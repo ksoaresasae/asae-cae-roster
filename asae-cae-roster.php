@@ -32,6 +32,9 @@ $asae_cae_classes = [
 	'class-asae-cae-db.php',
 	'class-asae-cae-logger.php',
 	'class-asae-cae-settings.php',
+	'class-asae-cae-wicket-client.php',
+	'class-asae-cae-photos.php',
+	'class-asae-cae-sync.php',
 	'class-asae-cae-admin.php',
 	'class-github-updater.php',
 ];
@@ -47,12 +50,13 @@ foreach ( $asae_cae_classes as $class_file ) {
 
 function asae_cae_activate() {
 	ASAE_CAE_DB::create_tables();
+	ASAE_CAE_Sync::schedule();
 	update_option( 'asae_cae_version', ASAE_CAE_VERSION );
 }
 register_activation_hook( __FILE__, 'asae_cae_activate' );
 
 function asae_cae_deactivate() {
-	// Clear any scheduled cron events for this plugin (none yet).
+	ASAE_CAE_Sync::unschedule();
 }
 register_deactivation_hook( __FILE__, 'asae_cae_deactivate' );
 
@@ -64,6 +68,14 @@ function asae_cae_init() {
 	if ( get_option( 'asae_cae_db_version' ) !== ASAE_CAE_VERSION ) {
 		ASAE_CAE_DB::create_tables();
 	}
+
+	// Cron callback must be wired regardless of context (cron also fires from
+	// frontend page loads).
+	ASAE_CAE_Sync::register_cron_action();
+
+	// Make sure the daily sync stays scheduled even if it was somehow lost
+	// (e.g. another plugin clears all events). schedule() is idempotent.
+	ASAE_CAE_Sync::schedule();
 
 	// Self-hosted update checker (GitHub Releases).
 	new ASAE_CAE_GitHub_Updater();

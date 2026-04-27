@@ -1,0 +1,462 @@
+<?php
+/**
+ * ASAE CAE Roster — Sync orchestration.
+ *
+ * Pulls active CAE records from Wicket, normalizes them, and stages them
+ * into wp_asae_cae_people_staging. On full success the staging table is
+ * atomically promoted to live (see ASAE_CAE_DB::promote_staging_to_live).
+ * Any failure leaves the live table untouched, so readers always see the
+ * last good snapshot.
+ *
+ * Per _start.md: this plugin's data is VERY LOW priority. On any error
+ * (auth, rate budget, timeout) we log the failure, abandon the run, and
+ * wait for the next scheduled tick. We never retry forever or hammer
+ * Wicket in ways that could starve another, more critical plugin.
+ *
+ * @package ASAE_CAE_Roster
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+class ASAE_CAE_Sync {
+
+	/** WP-Cron hook fired by the daily schedule. */
+	const CRON_HOOK = 'asae_cae_run_sync';
+
+	/**
+	 * Register the cron action so WP knows what to call when the event fires.
+	 * Called from plugins_loaded — must be wired regardless of admin context
+	 * since cron also runs on frontend page loads.
+	 *
+	 * @return void
+	 */
+	public static function register_cron_action() {
+		add_action( self::CRON_HOOK, array( __CLASS__, 'run_from_cron' ) );
+	}
+
+	/**
+	 * Cron entry point. Always runs as TRIGGER_CRON.
+	 *
+	 * @return void
+	 */
+	public static function run_from_cron() {
+		self::run( ASAE_CAE_Logger::TRIGGER_CRON );
+	}
+
+	/**
+	 * Schedule the daily sync at the configured local time.
+	 *
+	 * Idempotent: if an event is already scheduled, we leave it alone unless
+	 * the configured time has changed (in which case the caller should call
+	 * unschedule() first via reschedule()).
+	 *
+	 * @return bool True if a new event was scheduled or one already existed.
+	 */
+	public static function schedule() {
+		if ( wp_next_scheduled( self::CRON_HOOK ) ) {
+			return true;
+		}
+
+		$timestamp = self::next_run_timestamp();
+		$result    = wp_schedule_event( $timestamp, 'daily', self::CRON_HOOK );
+		return false !== $result;
+	}
+
+	/**
+	 * Clear all scheduled occurrences of our cron event.
+	 *
+	 * @return void
+	 */
+	public static function unschedule() {
+		wp_clear_scheduled_hook( self::CRON_HOOK );
+	}
+
+	/**
+	 * Reschedule from scratch. Call after settings changes to a new schedule
+	 * time.
+	 *
+	 * @return void
+	 */
+	public static function reschedule() {
+		self::unschedule();
+		self::schedule();
+	}
+
+	/**
+	 * Compute the next Unix timestamp at which the configured local-time
+	 * schedule (HH:MM in wp_timezone()) will next occur. If today's slot has
+	 * already passed, returns tomorrow's.
+	 *
+	 * @return int
+	 */
+	public static function next_run_timestamp() {
+		$tz     = wp_timezone();
+		$hour   = ASAE_CAE_Settings::get_schedule_hour();
+		$minute = ASAE_CAE_Settings::get_schedule_minute();
+
+		$now    = new DateTime( 'now', $tz );
+		$target = new DateTime(
+			sprintf( 'today %02d:%02d:00', $hour, $minute ),
+			$tz
+		);
+		if ( $target <= $now ) {
+			$target->modify( '+1 day' );
+		}
+		return $target->getTimestamp();
+	}
+
+	/**
+	 * Run a sync. Used by both cron and the admin "Sync Now" button.
+	 *
+	 * @param string $triggered_by ASAE_CAE_Logger::TRIGGER_*
+	 * @return array{ok:bool, message:string, log_id:int}
+	 */
+	public static function run( $triggered_by = ASAE_CAE_Logger::TRIGGER_CRON ) {
+		$log_id = ASAE_CAE_Logger::start( $triggered_by );
+
+		if ( ! ASAE_CAE_Settings::is_wicket_configured() ) {
+			$msg = __( 'Wicket is not fully configured (base URL, secret, and person ID required).', 'asae-cae-roster' );
+			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
+			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
+		}
+
+		// Always start from a clean staging table. Anything left over from a
+		// prior failed run is stale and would corrupt the new sync.
+		ASAE_CAE_DB::truncate_staging();
+
+		$client = new ASAE_CAE_Wicket_Client();
+
+		try {
+			$response = $client->get_all(
+				'people',
+				array(
+					'filter[tag_eq]'    => 'CAE',
+					'filter[status_eq]' => 'active',
+					'include'           => 'primary_organization,addresses',
+				),
+				25
+			);
+		} catch ( ASAE_CAE_Wicket_Exception $e ) {
+			$msg = $e->getMessage();
+			ASAE_CAE_Logger::update( $log_id, array( 'requests_made' => $client->requests_made() ) );
+			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
+			ASAE_CAE_DB::truncate_staging();
+			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
+		}
+
+		$included     = isset( $response['included'] ) ? (array) $response['included'] : array();
+		$orgs_index   = self::index_included( $included, 'organizations' );
+		$addrs_index  = self::index_included( $included, 'addresses' );
+
+		$processed = 0;
+		$skipped   = 0;
+		$today     = current_time( 'Y-m-d' );
+
+		$people = isset( $response['data'] ) ? (array) $response['data'] : array();
+		foreach ( $people as $person ) {
+			$record = self::normalize_person( $person, $orgs_index, $addrs_index, $today );
+			if ( null === $record ) {
+				$skipped++;
+				continue;
+			}
+
+			// Best-effort photo download (failures fall back to default at render time).
+			if ( ! empty( $record['photo_url'] ) ) {
+				$record['photo_attachment_id'] = ASAE_CAE_Photos::ensure_attachment_for_url( $record['photo_url'] );
+			} else {
+				$record['photo_attachment_id'] = 0;
+			}
+
+			$ok = self::insert_staging( $record );
+			if ( $ok ) {
+				$processed++;
+			} else {
+				$skipped++;
+			}
+		}
+
+		// Update progress on the log row before promoting (so a crash during
+		// promotion still leaves a useful trail).
+		ASAE_CAE_Logger::update(
+			$log_id,
+			array(
+				'requests_made'     => $client->requests_made(),
+				'records_processed' => $processed,
+				'notes'             => $skipped > 0
+					? sprintf( /* translators: %d: count of skipped records */ __( '%d record(s) skipped (inactive or unparseable).', 'asae-cae-roster' ), $skipped )
+					: '',
+			)
+		);
+
+		if ( ! ASAE_CAE_DB::promote_staging_to_live() ) {
+			$msg = __( 'Staging promotion failed (RENAME TABLE returned false). Live data unchanged.', 'asae-cae-roster' );
+			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
+			ASAE_CAE_DB::truncate_staging();
+			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
+		}
+
+		ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_SUCCESS );
+		return array(
+			'ok'      => true,
+			'message' => sprintf( /* translators: %d: number of CAE records */ __( 'Synced %d CAE record(s).', 'asae-cae-roster' ), $processed ),
+			'log_id'  => $log_id,
+		);
+	}
+
+	// ── normalization ────────────────────────────────────────────────────────
+
+	/**
+	 * Build an associative index { id → resource } from a JSON:API `included`
+	 * array, filtered to a specific resource type.
+	 *
+	 * @param array  $included
+	 * @param string $type
+	 * @return array<string,array>
+	 */
+	private static function index_included( array $included, $type ) {
+		$out = array();
+		foreach ( $included as $row ) {
+			if ( isset( $row['type'], $row['id'] ) && $row['type'] === $type ) {
+				$out[ (string) $row['id'] ] = $row;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Convert a raw Wicket person resource into a row ready for the staging
+	 * table. Returns null when the person is not a currently-active CAE.
+	 *
+	 * @param array  $person
+	 * @param array  $orgs_index
+	 * @param array  $addrs_index
+	 * @param string $today  Y-m-d in WP local time.
+	 * @return array|null
+	 */
+	private static function normalize_person( array $person, array $orgs_index, array $addrs_index, $today ) {
+		$attrs = isset( $person['attributes'] ) ? (array) $person['attributes'] : array();
+
+		// Hard filter: status must be active and not soft-deleted/anonymized.
+		if ( ( $attrs['status'] ?? '' ) !== 'active' ) {
+			return null;
+		}
+		if ( ! empty( $attrs['deleted_at'] ) ) {
+			return null;
+		}
+		if ( ! empty( $attrs['anonymized_at'] ) ) {
+			return null;
+		}
+
+		// Confirm the CAE designation is currently active. Wicket sometimes
+		// keeps the CAE tag on people whose certification has lapsed, so the
+		// designations data_field is the source of truth.
+		$cae_field = self::find_data_field( $attrs['data_fields'] ?? array(), 'designations' );
+		if ( null === $cae_field ) {
+			return null;
+		}
+		$value = isset( $cae_field['value'] ) && is_array( $cae_field['value'] ) ? $cae_field['value'] : array();
+		if ( empty( $value['cae'] ) ) {
+			return null;
+		}
+		$end_date = isset( $value['end_date'] ) ? (string) $value['end_date'] : '';
+		if ( '' !== $end_date && $end_date < $today ) {
+			return null;
+		}
+
+		$family_name      = (string) ( $attrs['family_name'] ?? '' );
+		$given_name       = (string) ( $attrs['given_name'] ?? '' );
+		$full_name        = (string) ( $attrs['full_name'] ?? trim( $given_name . ' ' . $family_name ) );
+		$honorific_suffix = (string) ( $attrs['honorific_suffix'] ?? '' );
+		$honorific_suffix = self::ensure_cae_in_suffix( $honorific_suffix );
+
+		// Photo lives inside data_fields → personal_info → photo_link.
+		$photo_url = '';
+		$pinfo     = self::find_data_field( $attrs['data_fields'] ?? array(), 'personal_info' );
+		if ( null !== $pinfo && isset( $pinfo['value']['photo_link'] ) ) {
+			$photo_url = (string) $pinfo['value']['photo_link'];
+		}
+
+		// Organization (via relationships.primary_organization → orgs_index).
+		$org_name = '';
+		$org_rel  = $person['relationships']['primary_organization']['data'] ?? null;
+		if ( is_array( $org_rel ) && ! empty( $org_rel['id'] ) ) {
+			$org_id = (string) $org_rel['id'];
+			if ( isset( $orgs_index[ $org_id ] ) ) {
+				$org_attrs = $orgs_index[ $org_id ]['attributes'] ?? array();
+				$org_name  = (string) ( $org_attrs['legal_name'] ?? $org_attrs['name'] ?? '' );
+			}
+		}
+
+		// City / state from the person's first usable address.
+		list( $city, $state ) = self::pick_city_state( $person, $addrs_index );
+
+		// First letter for the A-Z navigation. Capitalize and fall back to '#'
+		// for names that don't start with a letter (rare but possible).
+		$initial = '';
+		if ( '' !== $family_name ) {
+			$first = mb_substr( $family_name, 0, 1, 'UTF-8' );
+			$initial = ctype_alpha( $first ) ? strtoupper( $first ) : '#';
+		}
+
+		return array(
+			'wicket_uuid'         => (string) ( $person['id'] ?? '' ),
+			'family_name'         => $family_name,
+			'family_name_initial' => $initial,
+			'given_name'          => $given_name,
+			'full_name'           => $full_name,
+			'honorific_suffix'    => $honorific_suffix,
+			'job_title'           => (string) ( $attrs['job_title'] ?? '' ),
+			'organization_name'   => $org_name,
+			'city'                => $city,
+			'state'               => $state,
+			'photo_url'           => $photo_url,
+			'cae_start_date'      => self::sanitize_date( $value['start_date'] ?? null ),
+			'cae_end_date'        => self::sanitize_date( $end_date ),
+			'last_synced_at'      => current_time( 'mysql' ),
+		);
+	}
+
+	/**
+	 * Insert a normalized record into the staging table.
+	 *
+	 * @param array $row
+	 * @return bool
+	 */
+	private static function insert_staging( array $row ) {
+		if ( '' === $row['wicket_uuid'] ) {
+			return false;
+		}
+
+		global $wpdb;
+		$ok = $wpdb->insert(
+			ASAE_CAE_DB::staging_table(),
+			array(
+				'wicket_uuid'         => $row['wicket_uuid'],
+				'family_name'         => $row['family_name'],
+				'family_name_initial' => $row['family_name_initial'],
+				'given_name'          => $row['given_name'],
+				'full_name'           => $row['full_name'],
+				'honorific_suffix'    => $row['honorific_suffix'],
+				'job_title'           => $row['job_title'],
+				'organization_name'   => $row['organization_name'],
+				'city'                => $row['city'],
+				'state'               => $row['state'],
+				'photo_url'           => $row['photo_url'],
+				'photo_attachment_id' => (int) $row['photo_attachment_id'],
+				'cae_start_date'      => $row['cae_start_date'],
+				'cae_end_date'        => $row['cae_end_date'],
+				'last_synced_at'      => $row['last_synced_at'],
+			),
+			array(
+				'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s',
+				'%s', '%d', '%s', '%s', '%s',
+			)
+		);
+		return false !== $ok;
+	}
+
+	/**
+	 * Find one entry in attributes.data_fields by its `key`. Returns null when
+	 * the field isn't present or the array isn't shaped as expected.
+	 *
+	 * @param mixed  $data_fields Raw value from the API.
+	 * @param string $key
+	 * @return array|null
+	 */
+	private static function find_data_field( $data_fields, $key ) {
+		if ( ! is_array( $data_fields ) ) {
+			return null;
+		}
+		foreach ( $data_fields as $field ) {
+			if ( is_array( $field ) && isset( $field['key'] ) && $field['key'] === $key ) {
+				return $field;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Pick the most appropriate city/state pair from a person's addresses.
+	 * Prefers a "work" address; falls back to the first address that has
+	 * either a city or a state.
+	 *
+	 * @param array $person
+	 * @param array $addrs_index
+	 * @return array{0:string,1:string} [city, state]
+	 */
+	private static function pick_city_state( array $person, array $addrs_index ) {
+		$rels = $person['relationships']['addresses']['data'] ?? array();
+		if ( ! is_array( $rels ) ) {
+			return array( '', '' );
+		}
+
+		$preferred = null;
+		$first_any = null;
+
+		foreach ( $rels as $ref ) {
+			$id = isset( $ref['id'] ) ? (string) $ref['id'] : '';
+			if ( '' === $id || ! isset( $addrs_index[ $id ] ) ) {
+				continue;
+			}
+			$addr_attrs = $addrs_index[ $id ]['attributes'] ?? array();
+			$city       = (string) ( $addr_attrs['city'] ?? '' );
+			$state      = (string) ( $addr_attrs['state'] ?? $addr_attrs['region'] ?? '' );
+			if ( '' === $city && '' === $state ) {
+				continue;
+			}
+			$kind = strtolower( (string) ( $addr_attrs['kind'] ?? $addr_attrs['address_type'] ?? '' ) );
+			if ( null === $first_any ) {
+				$first_any = array( $city, $state );
+			}
+			if ( null === $preferred && in_array( $kind, array( 'work', 'business', 'office' ), true ) ) {
+				$preferred = array( $city, $state );
+				break; // Work address found — stop looking.
+			}
+		}
+
+		return $preferred ?? ( $first_any ?? array( '', '' ) );
+	}
+
+	/**
+	 * Make sure "CAE" is present in the displayed honorific suffix. Wicket
+	 * sometimes returns suffixes with other credentials (e.g. CPACC) but no
+	 * CAE even when the person has a valid CAE designation, so we append.
+	 *
+	 * @param string $suffix
+	 * @return string
+	 */
+	private static function ensure_cae_in_suffix( $suffix ) {
+		$suffix = trim( (string) $suffix );
+		if ( '' === $suffix ) {
+			return 'CAE';
+		}
+		// Tokenize on commas/whitespace and look for a case-insensitive CAE.
+		$has_cae = false;
+		foreach ( preg_split( '/[\s,]+/', $suffix ) as $token ) {
+			if ( strcasecmp( $token, 'CAE' ) === 0 ) {
+				$has_cae = true;
+				break;
+			}
+		}
+		return $has_cae ? $suffix : ( $suffix . ', CAE' );
+	}
+
+	/**
+	 * Validate / coerce a date-ish input to Y-m-d, returning null on garbage.
+	 *
+	 * @param mixed $raw
+	 * @return string|null
+	 */
+	private static function sanitize_date( $raw ) {
+		if ( ! is_string( $raw ) || '' === $raw ) {
+			return null;
+		}
+		// Accept either YYYY-MM-DD or full ISO 8601.
+		if ( preg_match( '/^(\d{4}-\d{2}-\d{2})/', $raw, $m ) ) {
+			return $m[1];
+		}
+		return null;
+	}
+}
