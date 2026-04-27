@@ -29,6 +29,9 @@ define( 'ASAE_CAE_PREFIX', 'asae_cae' );
 // ── Load Dependencies ─────────────────────────────────────────────────────────
 
 $asae_cae_classes = [
+	'class-asae-cae-db.php',
+	'class-asae-cae-logger.php',
+	'class-asae-cae-settings.php',
 	'class-asae-cae-admin.php',
 	'class-github-updater.php',
 ];
@@ -43,6 +46,7 @@ foreach ( $asae_cae_classes as $class_file ) {
 // ── Activation / Deactivation Hooks ───────────────────────────────────────────
 
 function asae_cae_activate() {
+	ASAE_CAE_DB::create_tables();
 	update_option( 'asae_cae_version', ASAE_CAE_VERSION );
 }
 register_activation_hook( __FILE__, 'asae_cae_activate' );
@@ -55,6 +59,12 @@ register_deactivation_hook( __FILE__, 'asae_cae_deactivate' );
 // ── Plugin Bootstrap ──────────────────────────────────────────────────────────
 
 function asae_cae_init() {
+	// Run a DB schema upgrade if the stored version differs. dbDelta() is
+	// idempotent and safe to call on every load.
+	if ( get_option( 'asae_cae_db_version' ) !== ASAE_CAE_VERSION ) {
+		ASAE_CAE_DB::create_tables();
+	}
+
 	// Self-hosted update checker (GitHub Releases).
 	new ASAE_CAE_GitHub_Updater();
 
