@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.2
+Stable tag: 0.0.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.3 =
+* Photos are no longer sideloaded into the WordPress media library. Sync stores the remote Wicket photo URL only; the public shortcode renders each <img> with native lazy-loading and a data-fallback attribute. A small client-side handler swaps the src to the admin-configured default photo when a remote image returns 404 or otherwise fails to load. This eliminates ~5,000 image downloads per sync and ~5,000 attachment rows per snapshot.
+* Added a live progress meter to the Roster tab, mirroring the Group Rosters plugin: progress bar, "X of Y — phase" headline, and a sub-status line for the current record. Powered by a polled AJAX endpoint that reads a snapshot wp_options row written by the sync at every phase boundary and every 10 records.
+* Concurrency guard: Sync::run() refuses to start when another sync is already running, with auto-recovery for stale 'running' rows older than 30 minutes (e.g. PHP crashed mid-run).
 
 = 0.0.2 =
 * Added "Stop All Active Jobs" admin action on the Roster tab. Sets a cooperative kill flag the running sync polls per-record, then marks any in-progress log rows as aborted and discards the staging table. Live roster is never touched, so readers continue to see the last good snapshot.

@@ -46,6 +46,45 @@
 .asae-cae-status-failed  { background: #fbe5e5; color: #b32d2e; }
 .asae-cae-status-running { background: #fcf3cd; color: #6a4a00; }
 
+/* Progress meter on the Roster tab. */
+.asae-cae-progress-panel {
+	margin: 1em 0 1.5em;
+	padding: 1em 1.25em;
+	background: #f6f7f7;
+	border: 1px solid #c3c4c7;
+	border-left: 4px solid #2271b1;
+	border-radius: 4px;
+}
+.asae-cae-progress-panel h2 {
+	margin: 0 0 0.6em;
+	font-size: 1.1em;
+}
+.asae-cae-progress-bar-wrap {
+	height: 18px;
+	background: #e8e8ea;
+	border-radius: 9999px;
+	overflow: hidden;
+	margin-bottom: 0.6em;
+	border: 1px solid #c3c4c7;
+}
+.asae-cae-progress-bar {
+	height: 100%;
+	background: #2271b1;
+	transition: width 300ms ease-out;
+	min-width: 0;
+}
+.asae-cae-progress-text {
+	margin: 0 0 0.2em;
+	font-weight: 600;
+	color: #1d2327;
+}
+.asae-cae-progress-detail {
+	margin: 0;
+	color: #50575e;
+	font-size: 13px;
+	font-style: italic;
+}
+
 .asae-cae-error-detail {
 	margin-top: 4px;
 	font-family: Consolas, Menlo, monospace;

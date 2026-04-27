@@ -19,6 +19,32 @@ $latest       = ASAE_CAE_DB::latest_sync();
 $next_run     = ASAE_CAE_Admin::format_next_run();
 $is_configured = ASAE_CAE_Settings::is_wicket_configured();
 
+// If a sync is running right now, render the progress panel visible so the
+// user sees state immediately on page load (without waiting for the JS poll).
+$progress       = ASAE_CAE_Sync::get_progress();
+$is_running     = ( $latest && 'running' === $latest->status && is_array( $progress ) );
+$progress_pct   = 0;
+$progress_text  = '';
+$progress_detail = '';
+if ( $is_running ) {
+	$p_total   = isset( $progress['total'] )   ? (int) $progress['total']   : 0;
+	$p_current = isset( $progress['current'] ) ? (int) $progress['current'] : 0;
+	$p_phase   = isset( $progress['phase'] )   ? (string) $progress['phase'] : '';
+	$progress_detail = isset( $progress['detail'] ) ? (string) $progress['detail'] : '';
+	if ( $p_total > 0 && $p_current > 0 ) {
+		$progress_pct  = (int) floor( ( $p_current / $p_total ) * 100 );
+		$progress_text = sprintf(
+			/* translators: 1: records done, 2: total records, 3: phase label */
+			__( '%1$d of %2$d — %3$s', 'asae-cae-roster' ),
+			$p_current,
+			$p_total,
+			$p_phase
+		);
+	} else {
+		$progress_text = '' !== $p_phase ? $p_phase : __( 'Running…', 'asae-cae-roster' );
+	}
+}
+
 $status_label = '';
 $status_class = '';
 if ( $latest ) {
@@ -103,6 +129,27 @@ if ( $latest ) {
 				</tr>
 			</tbody>
 		</table>
+
+		<section class="asae-cae-progress-panel" id="asae-cae-progress-panel" <?php echo $is_running ? '' : 'hidden'; ?>>
+			<h2><?php echo esc_html__( 'Sync in progress', 'asae-cae-roster' ); ?></h2>
+			<div class="asae-cae-progress-bar-wrap"
+				role="progressbar"
+				aria-label="<?php echo esc_attr__( 'CAE sync progress', 'asae-cae-roster' ); ?>"
+				aria-valuemin="0"
+				aria-valuemax="100"
+				aria-valuenow="<?php echo (int) $progress_pct; ?>"
+				id="asae-cae-progress-bar-wrap">
+				<div class="asae-cae-progress-bar" id="asae-cae-progress-bar"
+					style="width: <?php echo (int) $progress_pct; ?>%;"></div>
+			</div>
+			<p class="asae-cae-progress-text" id="asae-cae-progress-text" aria-live="polite">
+				<?php echo esc_html( $progress_text ); ?>
+			</p>
+			<p class="asae-cae-progress-detail" id="asae-cae-progress-detail" aria-live="polite"
+				<?php echo '' === $progress_detail ? 'hidden' : ''; ?>>
+				<?php echo esc_html( $progress_detail ); ?>
+			</p>
+		</section>
 
 		<h2><?php echo esc_html__( 'Actions', 'asae-cae-roster' ); ?></h2>
 

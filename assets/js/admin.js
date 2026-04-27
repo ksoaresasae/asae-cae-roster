@@ -123,6 +123,102 @@
 		});
 	}
 
+	// ── Progress meter (shared by Sync Now + initial-load running state) ────
+
+	var progressPanel    = $('asae-cae-progress-panel');
+	var progressBar      = $('asae-cae-progress-bar');
+	var progressBarWrap  = $('asae-cae-progress-bar-wrap');
+	var progressTextEl   = $('asae-cae-progress-text');
+	var progressDetailEl = $('asae-cae-progress-detail');
+	var pollTimer = null;
+	var pollIntervalMs = (asaeCaeAdmin.pollIntervalMs > 0) ? asaeCaeAdmin.pollIntervalMs : 3000;
+
+	function showProgressPanel() {
+		if (progressPanel) { progressPanel.hidden = false; }
+	}
+	function hideProgressPanel() {
+		if (progressPanel) { progressPanel.hidden = true; }
+	}
+
+	function paintProgress(progress) {
+		if (!progress) { return; }
+		var current = parseInt(progress.current, 10) || 0;
+		var total   = parseInt(progress.total, 10) || 0;
+		var phase   = progress.phase || '';
+		var detail  = progress.detail || '';
+
+		var pct = (total > 0 && current > 0)
+			? Math.min(100, Math.floor((current / total) * 100))
+			: 0;
+
+		if (progressBar)     { progressBar.style.width = pct + '%'; }
+		if (progressBarWrap) { progressBarWrap.setAttribute('aria-valuenow', String(pct)); }
+
+		var text;
+		if (total > 0 && current > 0) {
+			text = S.progressOf
+				.replace('%1$d', String(current))
+				.replace('%2$d', String(total))
+				.replace('%3$s', phase);
+		} else {
+			text = phase || S.progressRunning;
+		}
+		if (progressTextEl) { progressTextEl.textContent = text; }
+
+		if (progressDetailEl) {
+			progressDetailEl.textContent = detail;
+			progressDetailEl.hidden = (detail === '');
+		}
+	}
+
+	function fetchProgressOnce() {
+		return postAjax('asae_cae_get_progress')
+			.then(function (data) {
+				if (!data || !data.success || !data.data) { return null; }
+				var d = data.data;
+
+				if (d.is_running && d.progress) {
+					showProgressPanel();
+					paintProgress(d.progress);
+				} else {
+					// Sync ended (success, fail, or aborted) — reflect final state
+					// in the live record count and hide the panel.
+					var countEl = $('asae-cae-record-count');
+					if (countEl && typeof d.count !== 'undefined') {
+						countEl.textContent = String(d.count);
+					}
+					hideProgressPanel();
+				}
+				return d;
+			})
+			.catch(function () { return null; });
+	}
+
+	function startProgressPolling() {
+		if (pollTimer) { return; }
+		// Immediate first tick so the panel updates without waiting one interval.
+		fetchProgressOnce();
+		pollTimer = setInterval(function () {
+			fetchProgressOnce().then(function (d) {
+				if (d && !d.is_running) { stopProgressPolling(); }
+			});
+		}, pollIntervalMs);
+	}
+
+	function stopProgressPolling() {
+		if (pollTimer) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
+	}
+
+	// If the page rendered with the progress panel visible (a sync was already
+	// running on initial load), kick off polling immediately so the user sees
+	// updates without having to refresh.
+	if (progressPanel && !progressPanel.hidden) {
+		startProgressPolling();
+	}
+
 	// ── Sync Now ─────────────────────────────────────────────────────────────
 
 	var syncBtn = $('asae-cae-sync-now');
@@ -131,6 +227,13 @@
 			var stat = $('asae-cae-sync-status');
 			syncBtn.disabled = true;
 			setStatus(stat, S.syncing, 'busy');
+
+			// Surface the panel and start polling immediately — the run_sync
+			// AJAX is synchronous and won't return for minutes, so polling
+			// fetches running in parallel are what drive the live updates.
+			showProgressPanel();
+			paintProgress({ current: 0, total: 0, phase: S.progressRunning, detail: '' });
+			startProgressPolling();
 
 			postAjax('asae_cae_run_sync')
 				.then(function (data) {
@@ -145,7 +248,13 @@
 					}
 				})
 				.catch(function () { setStatus(stat, S.syncError, 'err'); })
-				.then(function () { syncBtn.disabled = false; });
+				.then(function () {
+					syncBtn.disabled = false;
+					// Final progress check + panel hide. The polling loop also
+					// handles this, but doing it once more synchronously keeps
+					// the UI snappy when the sync ends between poll ticks.
+					fetchProgressOnce().then(function () { stopProgressPolling(); });
+				});
 		});
 	}
 

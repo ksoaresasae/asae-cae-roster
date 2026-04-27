@@ -397,15 +397,34 @@ class ASAE_CAE_Shortcode {
 	 * decorative-image guidance — repeating the name in alt would be
 	 * redundant for screen readers).
 	 *
+	 * Photos are NOT downloaded at sync time. The src points at the remote
+	 * Wicket URL with native loading="lazy", and a data-fallback attribute
+	 * carries the admin-configured default URL. roster.js attaches an `error`
+	 * handler that swaps src to data-fallback when the remote image 404s or
+	 * fails to load — so a missing photo silently becomes the default rather
+	 * than a broken-image icon.
+	 *
 	 * @param object $rec
 	 * @return void
 	 */
 	private static function render_card( $rec ): void {
-		$photo_url = ASAE_CAE_Photos::resolve_url( (int) $rec->photo_attachment_id, 'medium' );
-		$is_empty  = ( '' === $photo_url );
-		$display_suffix = trim( (string) $rec->honorific_suffix );
+		$photo_url   = trim( (string) $rec->photo_url );
+		$default_url = ASAE_CAE_Photos::default_url( 'medium' );
 
-		$display_name = trim( (string) $rec->full_name );
+		// Pick the actual src. If the record has a photo URL, use it (the JS
+		// will swap to default on error). Otherwise render the default
+		// directly. If neither exists we render the empty-state placeholder.
+		if ( '' !== $photo_url ) {
+			$src = $photo_url;
+		} elseif ( '' !== $default_url ) {
+			$src = $default_url;
+		} else {
+			$src = '';
+		}
+		$is_empty = ( '' === $src );
+
+		$display_suffix = trim( (string) $rec->honorific_suffix );
+		$display_name   = trim( (string) $rec->full_name );
 		if ( '' === $display_name ) {
 			$display_name = trim( $rec->given_name . ' ' . $rec->family_name );
 		}
@@ -413,7 +432,11 @@ class ASAE_CAE_Shortcode {
 		<li class="asae-cae-card">
 			<div class="asae-cae-card-photo<?php echo $is_empty ? ' is-empty' : ''; ?>">
 				<?php if ( ! $is_empty ) : ?>
-					<img src="<?php echo esc_url( $photo_url ); ?>" alt="" loading="lazy" />
+					<img src="<?php echo esc_url( $src ); ?>"
+						<?php if ( '' !== $photo_url && '' !== $default_url && $photo_url !== $default_url ) : ?>
+							data-fallback="<?php echo esc_url( $default_url ); ?>"
+						<?php endif; ?>
+						alt="" loading="lazy" decoding="async" />
 				<?php endif; ?>
 			</div>
 			<div class="asae-cae-card-body">

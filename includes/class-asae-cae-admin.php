@@ -47,6 +47,7 @@ class ASAE_CAE_Admin {
 		add_action( 'wp_ajax_asae_cae_test_connection', array( __CLASS__, 'ajax_test_connection' ) );
 		add_action( 'wp_ajax_asae_cae_run_sync',       array( __CLASS__, 'ajax_run_sync' ) );
 		add_action( 'wp_ajax_asae_cae_stop_jobs',      array( __CLASS__, 'ajax_stop_jobs' ) );
+		add_action( 'wp_ajax_asae_cae_get_progress',   array( __CLASS__, 'ajax_get_progress' ) );
 	}
 
 	/**
@@ -116,13 +117,14 @@ class ASAE_CAE_Admin {
 			array(
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( self::AJAX_NONCE ),
+				'pollIntervalMs' => 3000,
 				'strings' => array(
 					'saving'           => __( 'Saving…', 'asae-cae-roster' ),
 					'saved'            => __( 'Settings saved.', 'asae-cae-roster' ),
 					'saveError'        => __( 'Could not save settings.', 'asae-cae-roster' ),
 					'testing'          => __( 'Testing connection…', 'asae-cae-roster' ),
 					'testFailed'       => __( 'Connection test failed.', 'asae-cae-roster' ),
-					'syncing'          => __( 'Sync running… this can take several minutes for thousands of records. You can leave this tab open.', 'asae-cae-roster' ),
+					'syncing'          => __( 'Sync running… progress is shown above. You can leave this tab open.', 'asae-cae-roster' ),
 					'syncError'        => __( 'Sync failed. See the Logs tab for details.', 'asae-cae-roster' ),
 					'stopping'         => __( 'Stopping all active jobs…', 'asae-cae-roster' ),
 					'stopError'        => __( 'Could not stop active jobs.', 'asae-cae-roster' ),
@@ -132,6 +134,8 @@ class ASAE_CAE_Admin {
 					'updatesError'     => __( 'Update check failed. Please try again.', 'asae-cae-roster' ),
 					'pickPhotoTitle'   => __( 'Select default photo', 'asae-cae-roster' ),
 					'pickPhotoButton'  => __( 'Use this photo', 'asae-cae-roster' ),
+					'progressRunning'  => __( 'Running…', 'asae-cae-roster' ),
+					'progressOf'       => __( '%1$d of %2$d — %3$s', 'asae-cae-roster' ),
 				),
 			)
 		);
@@ -321,6 +325,30 @@ class ASAE_CAE_Admin {
 				)
 			);
 		}
+	}
+
+	/**
+	 * Return the current sync progress snapshot for the Roster tab's progress
+	 * meter. Polled every few seconds by the admin JS while a sync is active.
+	 *
+	 * @return void
+	 */
+	public static function ajax_get_progress(): void {
+		self::verify_ajax();
+
+		$latest    = ASAE_CAE_DB::latest_sync();
+		$progress  = ASAE_CAE_Sync::get_progress();
+		$is_running = ( $latest && 'running' === $latest->status && is_array( $progress ) );
+
+		wp_send_json_success(
+			array(
+				'is_running'   => $is_running,
+				'progress'     => is_array( $progress ) ? $progress : null,
+				'count'        => ASAE_CAE_DB::count_live(),
+				'last_status'  => $latest ? (string) $latest->status : null,
+				'last_error'   => $latest && ! empty( $latest->error_message ) ? (string) $latest->error_message : '',
+			)
+		);
 	}
 
 	/**
