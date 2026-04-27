@@ -149,6 +149,31 @@
 		});
 	}
 
+	// ── Stop All Active Jobs ─────────────────────────────────────────────────
+
+	var stopBtn = $('asae-cae-stop-jobs');
+	if (stopBtn) {
+		stopBtn.addEventListener('click', function () {
+			if (!window.confirm(S.stopConfirm)) {
+				return;
+			}
+			var stat = $('asae-cae-stop-status');
+			stopBtn.disabled = true;
+			setStatus(stat, S.stopping, 'busy');
+
+			postAjax('asae_cae_stop_jobs')
+				.then(function (data) {
+					if (data && data.success) {
+						setStatus(stat, (data.data && data.data.message) || '', 'ok');
+					} else {
+						setStatus(stat, (data && data.data && data.data.message) || S.stopError, 'err');
+					}
+				})
+				.catch(function () { setStatus(stat, S.stopError, 'err'); })
+				.then(function () { stopBtn.disabled = false; });
+		});
+	}
+
 	// ── Check for Updates ───────────────────────────────────────────────────
 
 	var updatesBtn = $('asae-cae-check-updates');

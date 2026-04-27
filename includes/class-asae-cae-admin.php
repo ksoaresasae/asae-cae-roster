@@ -46,6 +46,7 @@ class ASAE_CAE_Admin {
 		add_action( 'wp_ajax_asae_cae_save_settings',  array( __CLASS__, 'ajax_save_settings' ) );
 		add_action( 'wp_ajax_asae_cae_test_connection', array( __CLASS__, 'ajax_test_connection' ) );
 		add_action( 'wp_ajax_asae_cae_run_sync',       array( __CLASS__, 'ajax_run_sync' ) );
+		add_action( 'wp_ajax_asae_cae_stop_jobs',      array( __CLASS__, 'ajax_stop_jobs' ) );
 	}
 
 	/**
@@ -123,6 +124,9 @@ class ASAE_CAE_Admin {
 					'testFailed'       => __( 'Connection test failed.', 'asae-cae-roster' ),
 					'syncing'          => __( 'Sync running… this can take several minutes for thousands of records. You can leave this tab open.', 'asae-cae-roster' ),
 					'syncError'        => __( 'Sync failed. See the Logs tab for details.', 'asae-cae-roster' ),
+					'stopping'         => __( 'Stopping all active jobs…', 'asae-cae-roster' ),
+					'stopError'        => __( 'Could not stop active jobs.', 'asae-cae-roster' ),
+					'stopConfirm'      => __( 'Stop all active sync jobs? Any in-progress sync will abort cleanly and the live roster will remain unchanged.', 'asae-cae-roster' ),
 					'checkingUpdates'  => __( 'Checking for updates…', 'asae-cae-roster' ),
 					'updatesChecked'   => __( 'Update check complete. Refresh the Plugins page to see results.', 'asae-cae-roster' ),
 					'updatesError'     => __( 'Update check failed. Please try again.', 'asae-cae-roster' ),
@@ -317,6 +321,23 @@ class ASAE_CAE_Admin {
 				)
 			);
 		}
+	}
+
+	/**
+	 * Stop every currently-running sync. Sets the cooperative kill flag,
+	 * marks any 'running' log rows as 'aborted', and truncates staging.
+	 *
+	 * @return void
+	 */
+	public static function ajax_stop_jobs(): void {
+		self::verify_ajax();
+		$result = ASAE_CAE_Sync::stop_all_active();
+		wp_send_json_success(
+			array(
+				'message' => $result['message'],
+				'stopped' => (int) $result['stopped'],
+			)
+		);
 	}
 
 	/**

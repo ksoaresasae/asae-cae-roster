@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.1
+Stable tag: 0.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.2 =
+* Added "Stop All Active Jobs" admin action on the Roster tab. Sets a cooperative kill flag the running sync polls per-record, then marks any in-progress log rows as aborted and discards the staging table. Live roster is never touched, so readers continue to see the last good snapshot.
 
 = 0.0.1 =
 * Initial release

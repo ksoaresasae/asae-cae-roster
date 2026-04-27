@@ -26,6 +26,13 @@ class ASAE_CAE_Sync {
 	const CRON_HOOK = 'asae_cae_run_sync';
 
 	/**
+	 * wp_options key holding the cooperative stop signal. When set to '1' a
+	 * running sync will exit cleanly at its next per-record check. Cleared at
+	 * the top of every fresh run so a stale flag doesn't kill new work.
+	 */
+	const STOP_FLAG = 'asae_cae_stop_signal';
+
+	/**
 	 * Register the cron action so WP knows what to call when the event fires.
 	 * Called from plugins_loaded — must be wired regardless of admin context
 	 * since cron also runs on frontend page loads.
@@ -114,6 +121,10 @@ class ASAE_CAE_Sync {
 	 * @return array{ok:bool, message:string, log_id:int}
 	 */
 	public static function run( $triggered_by = ASAE_CAE_Logger::TRIGGER_CRON ) {
+		// Clear any leftover stop signal from a prior request — otherwise this
+		// fresh run would abort on its first kill-switch check.
+		delete_option( self::STOP_FLAG );
+
 		$log_id = ASAE_CAE_Logger::start( $triggered_by );
 
 		if ( ! ASAE_CAE_Settings::is_wicket_configured() ) {
@@ -154,8 +165,18 @@ class ASAE_CAE_Sync {
 		$skipped   = 0;
 		$today     = current_time( 'Y-m-d' );
 
-		$people = isset( $response['data'] ) ? (array) $response['data'] : array();
+		$people  = isset( $response['data'] ) ? (array) $response['data'] : array();
+		$stopped = false;
+
 		foreach ( $people as $person ) {
+			// Cooperative stop check — set by the "Stop All Active Jobs" admin
+			// action. Read from the DB (not a transient) so external object
+			// caches can't mask the signal mid-run.
+			if ( '1' === self::read_stop_flag_uncached() ) {
+				$stopped = true;
+				break;
+			}
+
 			$record = self::normalize_person( $person, $orgs_index, $addrs_index, $today );
 			if ( null === $record ) {
 				$skipped++;
@@ -175,6 +196,22 @@ class ASAE_CAE_Sync {
 			} else {
 				$skipped++;
 			}
+		}
+
+		// Stopped mid-loop — finalize cleanly and leave live data alone.
+		if ( $stopped ) {
+			$msg = __( 'Stopped manually. Live roster unchanged; staging discarded.', 'asae-cae-roster' );
+			ASAE_CAE_Logger::update(
+				$log_id,
+				array(
+					'requests_made'     => $client->requests_made(),
+					'records_processed' => $processed,
+				)
+			);
+			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_ABORTED, $msg );
+			ASAE_CAE_DB::truncate_staging();
+			delete_option( self::STOP_FLAG );
+			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
 		}
 
 		// Update progress on the log row before promoting (so a crash during
@@ -203,6 +240,92 @@ class ASAE_CAE_Sync {
 			'message' => sprintf( /* translators: %d: number of CAE records */ __( 'Synced %d CAE record(s).', 'asae-cae-roster' ), $processed ),
 			'log_id'  => $log_id,
 		);
+	}
+
+	/**
+	 * Stop every currently-running sync. Called from the "Stop All Active
+	 * Jobs" admin button.
+	 *
+	 * Implementation:
+	 *   1. Set the cooperative stop flag so any sync running in another PHP
+	 *      process will exit cleanly at its next per-record check.
+	 *   2. Mark every existing 'running' log row as 'aborted' immediately
+	 *      (so the admin UI reflects the stop without waiting).
+	 *   3. Truncate the staging table so a half-populated mirror can't be
+	 *      promoted to live by anything else.
+	 *
+	 * Returns the number of log rows that were marked aborted.
+	 *
+	 * @return array{stopped:int, message:string}
+	 */
+	public static function stop_all_active() {
+		// Step 1: raise the flag. autoload=no keeps it out of every page load.
+		update_option( self::STOP_FLAG, '1', false );
+
+		// Step 2: terminate any 'running' rows in the log so the UI updates
+		// immediately. The actual PHP process may still be looping in another
+		// request; when it next checks the flag it will see the stop and exit
+		// cleanly without overwriting these rows (because finish() will run
+		// on the same id with status=aborted, identical to what we set here).
+		global $wpdb;
+		$running_now = (int) $wpdb->get_var(
+			'SELECT COUNT(*) FROM ' . ASAE_CAE_DB::log_table() . " WHERE status = 'running'"
+		);
+
+		$stopped = (int) $wpdb->update(
+			ASAE_CAE_DB::log_table(),
+			array(
+				'ended_at'      => current_time( 'mysql' ),
+				'status'        => ASAE_CAE_Logger::STATUS_ABORTED,
+				'error_message' => __( 'Stopped manually via admin action.', 'asae-cae-roster' ),
+			),
+			array( 'status' => 'running' ),
+			array( '%s', '%s', '%s' ),
+			array( '%s' )
+		);
+		if ( false === $stopped ) {
+			$stopped = 0;
+		}
+
+		// Step 3: discard any half-populated staging data.
+		ASAE_CAE_DB::truncate_staging();
+
+		if ( $running_now > 0 ) {
+			$msg = sprintf(
+				/* translators: %d: number of stopped runs */
+				_n(
+					'%d active sync stopped.',
+					'%d active syncs stopped.',
+					$running_now,
+					'asae-cae-roster'
+				),
+				$running_now
+			);
+		} else {
+			$msg = __( 'No active syncs were running. Staging cleared.', 'asae-cae-roster' );
+		}
+
+		return array(
+			'stopped' => $stopped,
+			'message' => $msg,
+		);
+	}
+
+	/**
+	 * Read the stop flag bypassing any object cache (transients/options can
+	 * be cached in long-running requests, which would mask a fresh signal).
+	 *
+	 * @return string '1' when stop is active, '' otherwise.
+	 */
+	private static function read_stop_flag_uncached() {
+		global $wpdb;
+		$val = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
+				self::STOP_FLAG
+			)
+		);
+		return null === $val ? '' : (string) $val;
 	}
 
 	// ── normalization ────────────────────────────────────────────────────────

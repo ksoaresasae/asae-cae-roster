@@ -116,6 +116,14 @@ if ( $latest ) {
 		</p>
 
 		<p>
+			<button type="button" class="button" id="asae-cae-stop-jobs"
+					aria-describedby="asae-cae-stop-status">
+				<?php echo esc_html__( 'Stop All Active Jobs', 'asae-cae-roster' ); ?>
+			</button>
+			<span id="asae-cae-stop-status" role="status" aria-live="polite" class="asae-cae-status-msg"></span>
+		</p>
+
+		<p>
 			<button type="button" class="button" id="asae-cae-check-updates"
 					aria-describedby="asae-cae-updates-status">
 				<?php echo esc_html__( 'Check for Updates Now', 'asae-cae-roster' ); ?>
