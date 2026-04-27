@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       ASAE CAE Roster
  * Plugin URI:        https://github.com/ksoaresasae/asae-cae-roster
- * Description:       (placeholder — populate via instructions/_start.md)
+ * Description:       Pull the full list of CAEs (Certified Association Executives) from a Wicket datasource and render them as a paginated, searchable, last-name-organized public roster via the [asae_cae_roster] shortcode.
  * Version:           0.0.1
  * Author:            Keith M. Soares
  * Author URI:        https://keithmsoares.com
@@ -35,6 +35,7 @@ $asae_cae_classes = [
 	'class-asae-cae-wicket-client.php',
 	'class-asae-cae-photos.php',
 	'class-asae-cae-sync.php',
+	'class-asae-cae-shortcode.php',
 	'class-asae-cae-admin.php',
 	'class-github-updater.php',
 ];
@@ -76,6 +77,9 @@ function asae_cae_init() {
 	// Make sure the daily sync stays scheduled even if it was somehow lost
 	// (e.g. another plugin clears all events). schedule() is idempotent.
 	ASAE_CAE_Sync::schedule();
+
+	// Public shortcode (registers add_shortcode + frontend asset enqueue).
+	ASAE_CAE_Shortcode::init();
 
 	// Self-hosted update checker (GitHub Releases).
 	new ASAE_CAE_GitHub_Updater();

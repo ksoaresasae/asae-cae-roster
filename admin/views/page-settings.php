@@ -106,7 +106,8 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 						<input type="number" id="asae-cae-schedule-hour" name="settings[schedule_hour]"
 							min="0" max="23" inputmode="numeric"
 							value="<?php echo esc_attr( $s['schedule_hour'] ); ?>"
-							class="small-text" />
+							class="small-text"
+							aria-describedby="asae-cae-schedule-help" />
 						<span aria-hidden="true">:</span>
 						<label for="asae-cae-schedule-minute" class="screen-reader-text">
 							<?php echo esc_html__( 'Minute (0-59)', 'asae-cae-roster' ); ?>
@@ -114,8 +115,9 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 						<input type="number" id="asae-cae-schedule-minute" name="settings[schedule_minute]"
 							min="0" max="59" inputmode="numeric"
 							value="<?php echo esc_attr( $s['schedule_minute'] ); ?>"
-							class="small-text" />
-						<p class="description">
+							class="small-text"
+							aria-describedby="asae-cae-schedule-help" />
+						<p id="asae-cae-schedule-help" class="description">
 							<?php echo esc_html__( '24-hour format. Use 02:00 for the default 2 AM run.', 'asae-cae-roster' ); ?>
 						</p>
 					</td>
@@ -135,8 +137,9 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 						<input type="number" id="asae-cae-items-per-page" name="settings[items_per_page]"
 							min="5" max="100" inputmode="numeric"
 							value="<?php echo esc_attr( $s['items_per_page'] ); ?>"
-							class="small-text" />
-						<p class="description">
+							class="small-text"
+							aria-describedby="asae-cae-items-per-page-help" />
+						<p id="asae-cae-items-per-page-help" class="description">
 							<?php echo esc_html__( 'Number of CAEs shown per page within each letter section. Default: 20.', 'asae-cae-roster' ); ?>
 						</p>
 					</td>
@@ -185,8 +188,9 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 						<input type="number" id="asae-cae-request-budget" name="settings[request_budget]"
 							min="1" max="10000" inputmode="numeric"
 							value="<?php echo esc_attr( $s['request_budget'] ); ?>"
-							class="small-text" />
-						<p class="description">
+							class="small-text"
+							aria-describedby="asae-cae-request-budget-help" />
+						<p id="asae-cae-request-budget-help" class="description">
 							<?php echo esc_html__( 'Sync aborts cleanly when this is reached. Default: 500.', 'asae-cae-roster' ); ?>
 						</p>
 					</td>
@@ -199,8 +203,9 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 						<input type="number" id="asae-cae-request-delay" name="settings[request_delay_ms]"
 							min="0" max="10000" inputmode="numeric"
 							value="<?php echo esc_attr( $s['request_delay_ms'] ); ?>"
-							class="small-text" />
-						<p class="description">
+							class="small-text"
+							aria-describedby="asae-cae-request-delay-help" />
+						<p id="asae-cae-request-delay-help" class="description">
 							<?php echo esc_html__( 'Default: 250 ms. Set to 0 only on isolated dev sites.', 'asae-cae-roster' ); ?>
 						</p>
 					</td>
