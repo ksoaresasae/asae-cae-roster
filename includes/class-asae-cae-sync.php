@@ -35,11 +35,27 @@ class ASAE_CAE_Sync {
 	/** wp_options key holding the live progress snapshot (autoload=no). */
 	const PROGRESS_KEY = 'asae_cae_sync_progress';
 
-	/** A 'running' log row older than this is treated as crashed and recovered. */
-	const STALE_RUN_SECONDS = 30 * MINUTE_IN_SECONDS;
+	/**
+	 * wp_options key holding the in-progress multi-chunk run state. Present
+	 * only while a chunked sync is active; cleared when the run finalizes
+	 * (success, failure, or stop). Schema:
+	 *   log_id        — sync_log row that owns this run
+	 *   next_page     — Wicket page number to fetch next (1-based)
+	 *   total_pages   — discovered from response meta (0 if unknown)
+	 *   total_items   — discovered from response meta (0 if unknown)
+	 *   processed     — records inserted into staging so far
+	 *   skipped       — records that failed normalization or insert
+	 *   requests_made — total Wicket calls across all chunks of this run
+	 *   started_at    — mysql ts when run() first initialized state
+	 *   updated_at    — mysql ts of the most recent chunk completion
+	 */
+	const CHUNK_STATE_KEY = 'asae_cae_chunk_state';
 
-	/** How often the foreach loop persists progress (every N records). */
-	const PROGRESS_TICK_EVERY = 10;
+	/** Wicket JSON:API page size. 25 is the platform default. */
+	const PAGE_SIZE = 25;
+
+	/** A 'running' log row whose chunk state hasn't updated in this long is treated as wedged. */
+	const STALE_RUN_SECONDS = 30 * MINUTE_IN_SECONDS;
 
 	/**
 	 * Register the cron action so WP knows what to call when the event fires.
@@ -126,6 +142,13 @@ class ASAE_CAE_Sync {
 	/**
 	 * Run a sync. Used by both cron and the admin "Sync Now" button.
 	 *
+	 * Each call processes ONE chunk (one or a few Wicket pages) and either
+	 * promotes staging to live (when all pages are done) or schedules the
+	 * next single-event chunk. Across many chunks, a full sync of 4–5k
+	 * records takes ~15–30 minutes at default settings (1 page per chunk,
+	 * 5-second delay between chunks) — gentle on Wicket and resumable
+	 * across PHP-process boundaries.
+	 *
 	 * @param string $triggered_by ASAE_CAE_Logger::TRIGGER_*
 	 * @return array{ok:bool, message:string, log_id:int}
 	 */
@@ -134,158 +157,405 @@ class ASAE_CAE_Sync {
 		// fresh run would abort on its first kill-switch check.
 		delete_option( self::STOP_FLAG );
 
-		// Recover stale 'running' log rows (e.g. PHP crashed mid-sync) and
-		// then refuse to start if a fresh sync is genuinely active.
+		// Recover wedged 'running' log rows (e.g. PHP crashed mid-chunk and
+		// no further chunk events were ever scheduled). Always runs first.
 		self::recover_stale_runs();
-		if ( self::is_sync_in_progress() ) {
-			$msg = __( 'Another sync is already in progress. Wait for it to finish or click Stop All Active Jobs.', 'asae-cae-roster' );
-			return array( 'ok' => false, 'message' => $msg, 'log_id' => 0 );
-		}
 
-		$log_id = ASAE_CAE_Logger::start( $triggered_by );
-		self::set_progress( 0, 0, __( 'Preparing…', 'asae-cae-roster' ) );
+		$state = self::get_chunk_state();
 
-		if ( ! ASAE_CAE_Settings::is_wicket_configured() ) {
-			$msg = __( 'Wicket is not fully configured (base URL, secret, and person ID required).', 'asae-cae-roster' );
-			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
-			self::clear_progress();
-			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
-		}
+		if ( null === $state ) {
+			// Fresh start. Refuse if some other 'running' row exists (defensive —
+			// recover_stale_runs would have cleared anything truly dead).
+			if ( self::is_sync_in_progress() ) {
+				return array(
+					'ok'      => false,
+					'message' => __( 'Another sync is already in progress. Wait for it to finish or click Stop All Active Jobs.', 'asae-cae-roster' ),
+					'log_id'  => 0,
+				);
+			}
 
-		// Always start from a clean staging table. Anything left over from a
-		// prior failed run is stale and would corrupt the new sync.
-		self::set_progress( 0, 0, __( 'Clearing staging table…', 'asae-cae-roster' ) );
-		ASAE_CAE_DB::truncate_staging();
+			if ( ! ASAE_CAE_Settings::is_wicket_configured() ) {
+				$msg    = __( 'Wicket is not fully configured (base URL, secret, and person ID required).', 'asae-cae-roster' );
+				$log_id = ASAE_CAE_Logger::start( $triggered_by );
+				ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
+				return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
+			}
 
-		$client = new ASAE_CAE_Wicket_Client();
-
-		self::set_progress( 0, 0, __( 'Fetching CAEs from Wicket…', 'asae-cae-roster' ) );
-
-		try {
-			$response = $client->get_all(
-				'people',
-				array(
-					'filter[tag_eq]'    => 'CAE',
-					'filter[status_eq]' => 'active',
-					'include'           => 'primary_organization,addresses',
-				),
-				25
-			);
-		} catch ( ASAE_CAE_Wicket_Exception $e ) {
-			$msg = $e->getMessage();
-			ASAE_CAE_Logger::update( $log_id, array( 'requests_made' => $client->requests_made() ) );
-			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
+			$log_id = ASAE_CAE_Logger::start( $triggered_by );
 			ASAE_CAE_DB::truncate_staging();
-			self::clear_progress();
-			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
+			$state = array(
+				'log_id'        => (int) $log_id,
+				'next_page'     => 1,
+				'total_pages'   => 0,
+				'total_items'   => 0,
+				'processed'     => 0,
+				'skipped'       => 0,
+				'requests_made' => 0,
+				'started_at'    => current_time( 'mysql' ),
+				'updated_at'    => current_time( 'mysql' ),
+			);
+			self::save_chunk_state( $state );
+			self::set_progress( 0, 0, __( 'Preparing chunked sync…', 'asae-cae-roster' ) );
 		}
 
-		$included     = isset( $response['included'] ) ? (array) $response['included'] : array();
-		$orgs_index   = self::index_included( $included, 'organizations' );
-		$addrs_index  = self::index_included( $included, 'addresses' );
+		return self::run_chunk( $state );
+	}
 
-		$processed = 0;
-		$skipped   = 0;
-		$today     = current_time( 'Y-m-d' );
+	/**
+	 * Process a single chunk (1–N Wicket pages) of the in-progress run, then
+	 * either schedule the next chunk or finalize the sync.
+	 *
+	 * @param array $state The chunk_state row (already validated by run()).
+	 * @return array{ok:bool, message:string, log_id:int}
+	 */
+	private static function run_chunk( array $state ) {
+		$log_id = (int) $state['log_id'];
 
-		$people  = isset( $response['data'] ) ? (array) $response['data'] : array();
-		$total   = count( $people );
-		$stopped = false;
+		// Honor an admin-issued stop before doing any Wicket work.
+		if ( '1' === self::read_stop_flag_uncached() ) {
+			return self::finalize_stopped( $log_id, $state );
+		}
 
-		self::set_progress( 0, $total, __( 'Processing records…', 'asae-cae-roster' ) );
+		$client          = new ASAE_CAE_Wicket_Client();
+		$pages_per_chunk = max( 1, ASAE_CAE_Settings::get_pages_per_chunk() );
+		$start_page      = (int) $state['next_page'];
+		$end_page        = $start_page + $pages_per_chunk - 1;
 
-		$idx = 0;
-		foreach ( $people as $person ) {
-			$idx++;
+		self::set_progress(
+			(int) $state['processed'],
+			(int) $state['total_items'],
+			sprintf(
+				/* translators: 1: starting page, 2: ending page */
+				__( 'Fetching pages %1$d–%2$d…', 'asae-cae-roster' ),
+				$start_page,
+				$end_page
+			)
+		);
 
-			// Cooperative stop check — set by the "Stop All Active Jobs" admin
-			// action. Read from the DB (not a transient) so external object
-			// caches can't mask the signal mid-run.
-			if ( '1' === self::read_stop_flag_uncached() ) {
-				$stopped = true;
+		$data_acc     = array();
+		$included_acc = array();
+		$hit_end      = false;
+
+		for ( $i = 0; $i < $pages_per_chunk; $i++ ) {
+			$page = (int) $state['next_page'];
+			try {
+				$resp = $client->request(
+					'people',
+					array(
+						'filter[tag_eq]'    => 'CAE',
+						'filter[status_eq]' => 'active',
+						'include'           => 'primary_organization,addresses',
+						'sort'              => 'family_name',
+						'page[size]'        => self::PAGE_SIZE,
+						'page[number]'      => $page,
+					)
+				);
+			} catch ( ASAE_CAE_Wicket_Exception $e ) {
+				return self::finalize_failed( $log_id, $state, $client, $e->getMessage() );
+			}
+
+			$data     = isset( $resp['data'] ) ? (array) $resp['data'] : array();
+			$included = isset( $resp['included'] ) ? (array) $resp['included'] : array();
+
+			// Capture totals from JSON:API meta (may not be present on all responses).
+			$meta_total_pages = isset( $resp['meta']['page']['total_pages'] ) ? (int) $resp['meta']['page']['total_pages'] : 0;
+			$meta_total_items = isset( $resp['meta']['page']['total_items'] ) ? (int) $resp['meta']['page']['total_items'] : 0;
+			if ( $meta_total_pages > $state['total_pages'] ) {
+				$state['total_pages'] = $meta_total_pages;
+			}
+			if ( $meta_total_items > $state['total_items'] ) {
+				$state['total_items'] = $meta_total_items;
+			}
+
+			foreach ( $data as $row ) {
+				$data_acc[] = $row;
+			}
+			foreach ( $included as $row ) {
+				$included_acc[] = $row;
+			}
+
+			$state['next_page'] = $page + 1;
+
+			// Short page = end of dataset.
+			if ( count( $data ) < self::PAGE_SIZE ) {
+				$hit_end = true;
 				break;
+			}
+		}
+
+		// Process accumulated records into staging.
+		$orgs_index  = self::index_included( $included_acc, 'organizations' );
+		$addrs_index = self::index_included( $included_acc, 'addresses' );
+		$today       = current_time( 'Y-m-d' );
+
+		$last_name = '';
+		foreach ( $data_acc as $person ) {
+			if ( '1' === self::read_stop_flag_uncached() ) {
+				$state['requests_made'] += $client->requests_made();
+				return self::finalize_stopped( $log_id, $state );
 			}
 
 			$record = self::normalize_person( $person, $orgs_index, $addrs_index, $today );
 			if ( null === $record ) {
-				$skipped++;
+				$state['skipped']++;
+				continue;
+			}
+			$record['photo_attachment_id'] = 0; // photos are lazy-loaded; see ASAE_CAE_Photos.
+			if ( self::insert_staging( $record ) ) {
+				$state['processed']++;
+				$last_name = (string) $record['full_name'];
 			} else {
-				// Photos are no longer downloaded — we just store the URL and
-				// the shortcode lazy-loads it at view time, falling back to
-				// the admin-configured default if it 404s. See ASAE_CAE_Photos.
-				$record['photo_attachment_id'] = 0;
-				$ok = self::insert_staging( $record );
-				if ( $ok ) {
-					$processed++;
-				} else {
-					$skipped++;
-				}
-			}
-
-			// Persist progress every N records so the admin poll has fresh
-			// data without us paying a DB write per row.
-			if ( 0 === ( $idx % self::PROGRESS_TICK_EVERY ) || $idx === $total ) {
-				$detail = ( null !== $record && '' !== $record['full_name'] )
-					? $record['full_name']
-					: '';
-				self::set_progress( $processed, $total, __( 'Processing records…', 'asae-cae-roster' ), $detail );
-				ASAE_CAE_Logger::update(
-					$log_id,
-					array(
-						'requests_made'     => $client->requests_made(),
-						'records_processed' => $processed,
-					)
-				);
+				$state['skipped']++;
 			}
 		}
 
-		// Stopped mid-loop — finalize cleanly and leave live data alone.
-		if ( $stopped ) {
-			$msg = __( 'Stopped manually. Live roster unchanged; staging discarded.', 'asae-cae-roster' );
-			ASAE_CAE_Logger::update(
-				$log_id,
-				array(
-					'requests_made'     => $client->requests_made(),
-					'records_processed' => $processed,
-				)
-			);
-			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_ABORTED, $msg );
-			ASAE_CAE_DB::truncate_staging();
-			delete_option( self::STOP_FLAG );
-			self::clear_progress();
-			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
-		}
+		$state['requests_made'] += $client->requests_made();
+		$state['updated_at']     = current_time( 'mysql' );
 
-		// Update progress on the log row before promoting (so a crash during
-		// promotion still leaves a useful trail).
+		// Flush counters to the log row so the Logs tab updates between chunks.
 		ASAE_CAE_Logger::update(
 			$log_id,
 			array(
-				'requests_made'     => $client->requests_made(),
-				'records_processed' => $processed,
-				'notes'             => $skipped > 0
-					? sprintf( /* translators: %d: count of skipped records */ __( '%d record(s) skipped (inactive or unparseable).', 'asae-cae-roster' ), $skipped )
-					: '',
+				'requests_made'     => (int) $state['requests_made'],
+				'records_processed' => (int) $state['processed'],
 			)
 		);
 
-		self::set_progress( $processed, $total, __( 'Promoting staging to live…', 'asae-cae-roster' ) );
+		// Done?
+		$exhausted = $hit_end
+			|| ( $state['total_pages'] > 0 && (int) $state['next_page'] > (int) $state['total_pages'] );
+
+		if ( $exhausted ) {
+			return self::finalize_success( $log_id, $state );
+		}
+
+		// More chunks to go: persist and self-reschedule.
+		self::save_chunk_state( $state );
+		self::set_progress(
+			(int) $state['processed'],
+			(int) max( $state['total_items'], $state['processed'] ),
+			__( 'Processing records…', 'asae-cae-roster' ),
+			$last_name
+		);
+
+		$delay = max( 1, ASAE_CAE_Settings::get_chunk_delay_seconds() );
+		wp_schedule_single_event( time() + $delay, self::CRON_HOOK );
+
+		return array(
+			'ok'      => true,
+			'log_id'  => $log_id,
+			'message' => sprintf(
+				/* translators: 1: total processed so far, 2: delay seconds */
+				__( 'Chunk done: %1$d records so far. Next chunk in %2$d seconds.', 'asae-cae-roster' ),
+				(int) $state['processed'],
+				$delay
+			),
+		);
+	}
+
+	/**
+	 * Finalize a successful run: promote staging → live and clear all
+	 * transient state.
+	 */
+	private static function finalize_success( $log_id, array $state ) {
+		self::set_progress(
+			(int) $state['processed'],
+			(int) max( $state['total_items'], $state['processed'] ),
+			__( 'Promoting staging to live…', 'asae-cae-roster' )
+		);
 
 		if ( ! ASAE_CAE_DB::promote_staging_to_live() ) {
 			$msg = __( 'Staging promotion failed (RENAME TABLE returned false). Live data unchanged.', 'asae-cae-roster' );
 			ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
 			ASAE_CAE_DB::truncate_staging();
+			self::clear_chunk_state();
 			self::clear_progress();
 			return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
 		}
 
+		$skipped = (int) $state['skipped'];
+		ASAE_CAE_Logger::update(
+			$log_id,
+			array(
+				'notes' => $skipped > 0
+					? sprintf( /* translators: %d: count of skipped records */ __( '%d record(s) skipped (inactive or unparseable).', 'asae-cae-roster' ), $skipped )
+					: '',
+			)
+		);
 		ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_SUCCESS );
+		self::clear_chunk_state();
 		self::clear_progress();
+
 		return array(
 			'ok'      => true,
-			'message' => sprintf( /* translators: %d: number of CAE records */ __( 'Synced %d CAE record(s).', 'asae-cae-roster' ), $processed ),
+			'message' => sprintf(
+				/* translators: %d: number of CAE records */
+				__( 'Synced %d CAE record(s).', 'asae-cae-roster' ),
+				(int) $state['processed']
+			),
 			'log_id'  => $log_id,
 		);
+	}
+
+	/**
+	 * Finalize a sync that hit a Wicket error mid-chunk. Live data untouched.
+	 */
+	private static function finalize_failed( $log_id, array $state, $client, $error_message ) {
+		ASAE_CAE_Logger::update(
+			$log_id,
+			array( 'requests_made' => (int) $state['requests_made'] + (int) $client->requests_made() )
+		);
+		ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $error_message );
+		ASAE_CAE_DB::truncate_staging();
+		self::clear_chunk_state();
+		self::clear_progress();
+
+		return array(
+			'ok'      => false,
+			'message' => $error_message,
+			'log_id'  => $log_id,
+		);
+	}
+
+	/**
+	 * Finalize a sync that was stopped via the kill flag.
+	 */
+	private static function finalize_stopped( $log_id, array $state ) {
+		$msg = __( 'Stopped manually. Live roster unchanged; staging discarded.', 'asae-cae-roster' );
+		ASAE_CAE_Logger::update(
+			$log_id,
+			array(
+				'requests_made'     => (int) $state['requests_made'],
+				'records_processed' => (int) $state['processed'],
+			)
+		);
+		ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_ABORTED, $msg );
+		ASAE_CAE_DB::truncate_staging();
+		delete_option( self::STOP_FLAG );
+		self::clear_chunk_state();
+		self::clear_progress();
+
+		return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
+	}
+
+	/**
+	 * Fetch the first $limit CAEs alphabetically by family_name, normalize
+	 * them, and return the rows. NEVER touches the staging or live tables —
+	 * pure preview for the admin "Dry Run" button.
+	 *
+	 * @param int $limit Max records to return (1–100).
+	 * @return array{ok:bool, message:string, rows:array, requests_made:int}
+	 */
+	public static function dry_run( $limit = 50 ) {
+		$limit = max( 1, min( 100, (int) $limit ) );
+
+		if ( ! ASAE_CAE_Settings::is_wicket_configured() ) {
+			return array(
+				'ok'            => false,
+				'message'       => __( 'Wicket is not fully configured.', 'asae-cae-roster' ),
+				'rows'          => array(),
+				'requests_made' => 0,
+			);
+		}
+
+		// Tight per-call budget: enough to fetch ceil($limit / page_size) pages
+		// plus generous retry headroom, but never enough to walk the whole roster.
+		$pages_needed   = (int) ceil( $limit / self::PAGE_SIZE );
+		$request_budget = max( 5, $pages_needed * 3 );
+		$client         = new ASAE_CAE_Wicket_Client( null, null, null, $request_budget, ASAE_CAE_Settings::get_request_delay_ms() );
+
+		$data_acc     = array();
+		$included_acc = array();
+		$today        = current_time( 'Y-m-d' );
+
+		try {
+			for ( $page = 1; $page <= $pages_needed && count( $data_acc ) < $limit; $page++ ) {
+				$resp = $client->request(
+					'people',
+					array(
+						'filter[tag_eq]'    => 'CAE',
+						'filter[status_eq]' => 'active',
+						'include'           => 'primary_organization,addresses',
+						'sort'              => 'family_name',
+						'page[size]'        => self::PAGE_SIZE,
+						'page[number]'      => $page,
+					)
+				);
+				$data     = isset( $resp['data'] ) ? (array) $resp['data'] : array();
+				$included = isset( $resp['included'] ) ? (array) $resp['included'] : array();
+				foreach ( $data as $row ) {
+					$data_acc[] = $row;
+				}
+				foreach ( $included as $row ) {
+					$included_acc[] = $row;
+				}
+				if ( count( $data ) < self::PAGE_SIZE ) {
+					break; // last page reached
+				}
+			}
+		} catch ( ASAE_CAE_Wicket_Exception $e ) {
+			return array(
+				'ok'            => false,
+				'message'       => $e->getMessage(),
+				'rows'          => array(),
+				'requests_made' => $client->requests_made(),
+			);
+		}
+
+		// Normalize → only keep currently-active CAEs, just like the real sync.
+		$orgs_index  = self::index_included( $included_acc, 'organizations' );
+		$addrs_index = self::index_included( $included_acc, 'addresses' );
+
+		$rows = array();
+		foreach ( $data_acc as $person ) {
+			$record = self::normalize_person( $person, $orgs_index, $addrs_index, $today );
+			if ( null !== $record ) {
+				$rows[] = $record;
+			}
+		}
+
+		// Defensive client-side sort by family_name then given_name — Wicket
+		// should already have sorted, but if it ignored our sort param this
+		// keeps the preview consistent with how the public roster orders rows.
+		usort(
+			$rows,
+			function ( $a, $b ) {
+				$fa = strcasecmp( (string) $a['family_name'], (string) $b['family_name'] );
+				if ( 0 !== $fa ) {
+					return $fa;
+				}
+				return strcasecmp( (string) $a['given_name'], (string) $b['given_name'] );
+			}
+		);
+
+		$rows = array_slice( $rows, 0, $limit );
+
+		return array(
+			'ok'            => true,
+			'message'       => sprintf(
+				/* translators: %d: number of rows returned */
+				_n( 'Dry run returned %d record.', 'Dry run returned %d records.', count( $rows ), 'asae-cae-roster' ),
+				count( $rows )
+			),
+			'rows'          => $rows,
+			'requests_made' => $client->requests_made(),
+		);
+	}
+
+	// ── Chunk state storage ─────────────────────────────────────────────────
+
+	/** @return array|null */
+	public static function get_chunk_state() {
+		$val = get_option( self::CHUNK_STATE_KEY, null );
+		return is_array( $val ) ? $val : null;
+	}
+
+	private static function save_chunk_state( array $state ) {
+		update_option( self::CHUNK_STATE_KEY, $state, false );
+	}
+
+	private static function clear_chunk_state() {
+		delete_option( self::CHUNK_STATE_KEY );
 	}
 
 	/**
@@ -303,16 +573,29 @@ class ASAE_CAE_Sync {
 	}
 
 	/**
-	 * Auto-recover any 'running' log row whose started_at is older than
-	 * STALE_RUN_SECONDS — these represent crashed PHP processes that never
-	 * got to call finish(). Marks them aborted so they don't permanently
-	 * block new syncs.
+	 * Auto-recover wedged 'running' rows whose chunk_state hasn't advanced in
+	 * STALE_RUN_SECONDS. With chunked syncs, started_at is no longer a useful
+	 * staleness signal — a healthy run can take 30+ minutes overall. Use the
+	 * chunk_state's updated_at instead, falling back to started_at when no
+	 * chunk_state exists at all (legacy / failed-pre-init runs).
 	 *
 	 * @return void
 	 */
 	private static function recover_stale_runs() {
 		global $wpdb;
-		$cutoff = gmdate( 'Y-m-d H:i:s', time() - self::STALE_RUN_SECONDS );
+		$state = self::get_chunk_state();
+		$cutoff_ts = time() - self::STALE_RUN_SECONDS;
+
+		// Case 1: chunk_state exists and is fresh → run is healthy, do nothing.
+		if ( is_array( $state ) && ! empty( $state['updated_at'] ) ) {
+			$last = strtotime( (string) $state['updated_at'] . ' UTC' );
+			if ( $last && $last >= $cutoff_ts ) {
+				return;
+			}
+		}
+
+		// Case 2: stale chunk_state OR no chunk_state but running rows exist.
+		$cutoff_mysql = gmdate( 'Y-m-d H:i:s', $cutoff_ts );
 		$wpdb->query(
 			$wpdb->prepare(
 				'UPDATE ' . ASAE_CAE_DB::log_table() .
@@ -320,10 +603,17 @@ class ASAE_CAE_Sync {
 					" WHERE status = 'running' AND started_at < %s",
 				ASAE_CAE_Logger::STATUS_ABORTED,
 				current_time( 'mysql' ),
-				__( 'Run abandoned: marked aborted automatically after exceeding the stale-run threshold.', 'asae-cae-roster' ),
-				$cutoff
+				__( 'Run abandoned: chunk state stalled past the recovery threshold.', 'asae-cae-roster' ),
+				$cutoff_mysql
 			)
 		);
+
+		// Always clear the (possibly stale) state and any leftover scheduled chunks.
+		self::clear_chunk_state();
+		self::clear_progress();
+		wp_clear_scheduled_hook( self::CRON_HOOK );
+		// Restore the daily recurring schedule (clear nuked it along with one-shots).
+		self::schedule();
 	}
 
 	/**
@@ -371,8 +661,14 @@ class ASAE_CAE_Sync {
 			$stopped = 0;
 		}
 
-		// Step 3: discard any half-populated staging data.
+		// Step 3: discard any half-populated staging data, drop the in-progress
+		// chunk state, and unschedule any pending single-event chunks so the
+		// run doesn't resurrect itself on the next page load.
 		ASAE_CAE_DB::truncate_staging();
+		self::clear_chunk_state();
+		self::clear_progress();
+		wp_clear_scheduled_hook( self::CRON_HOOK );
+		self::schedule(); // restore the daily recurring schedule.
 
 		if ( $running_now > 0 ) {
 			$msg = sprintf(

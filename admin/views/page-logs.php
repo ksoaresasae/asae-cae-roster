@@ -51,7 +51,10 @@ $fmt_duration = static function ( $start, $end ) {
 };
 ?>
 <div class="wrap asae-cae-wrap">
-	<h1><?php echo esc_html__( 'ASAE CAE Roster', 'asae-cae-roster' ); ?></h1>
+	<h1>
+		<?php echo esc_html__( 'ASAE CAE Roster', 'asae-cae-roster' ); ?>
+		<?php ASAE_CAE_Admin::render_version_badge(); ?>
+	</h1>
 	<?php ASAE_CAE_Admin::render_tabs(); ?>
 
 	<div class="asae-cae-tab-content" role="region" aria-labelledby="asae-cae-logs-heading">

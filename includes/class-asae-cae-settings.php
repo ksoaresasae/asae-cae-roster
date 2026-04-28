@@ -34,8 +34,14 @@ class ASAE_CAE_Settings {
 			'wicket_person_id'            => '',
 
 			// Rate / retry behaviour (per _start.md: low priority, never block other systems).
-			'request_budget'              => 500,   // Max HTTP requests per sync run.
+			'request_budget'              => 500,   // Per-CHUNK ceiling, not per full sync. With pages_per_chunk=1 this is effectively unlimited; only matters as a safety cap if a single chunk goes wild.
 			'request_delay_ms'            => 250,   // Courtesy delay between requests.
+
+			// Chunked sync: a full sync is now made of many small WP-Cron
+			// ticks instead of one big run. This keeps Wicket pressure low
+			// and works around per-process timeouts.
+			'pages_per_chunk'             => 1,     // How many Wicket pages each chunk fetches. 1 = 25 records.
+			'chunk_delay_seconds'         => 5,     // Wait between chunks before the next single-event fires.
 
 			// Scheduled sync (defaults to 2:00 local time per _start.md).
 			'schedule_hour'               => 2,
@@ -101,6 +107,13 @@ class ASAE_CAE_Settings {
 			$sanitized['request_delay_ms'] = self::clamp_int( $input['request_delay_ms'], 0, 10000, 250 );
 		}
 
+		if ( array_key_exists( 'pages_per_chunk', $input ) ) {
+			$sanitized['pages_per_chunk'] = self::clamp_int( $input['pages_per_chunk'], 1, 50, 1 );
+		}
+		if ( array_key_exists( 'chunk_delay_seconds', $input ) ) {
+			$sanitized['chunk_delay_seconds'] = self::clamp_int( $input['chunk_delay_seconds'], 1, 600, 5 );
+		}
+
 		if ( array_key_exists( 'schedule_hour', $input ) ) {
 			$sanitized['schedule_hour'] = self::clamp_int( $input['schedule_hour'], 0, 23, 2 );
 		}
@@ -124,9 +137,11 @@ class ASAE_CAE_Settings {
 	public static function get_base_url() { return (string) self::get( 'wicket_base_url' ); }
 	public static function get_secret()   { return (string) self::get( 'wicket_secret' ); }
 	public static function get_person_id() { return (string) self::get( 'wicket_person_id' ); }
-	public static function get_request_budget()   { return (int) self::get( 'request_budget' ); }
-	public static function get_request_delay_ms() { return (int) self::get( 'request_delay_ms' ); }
-	public static function get_schedule_hour()    { return (int) self::get( 'schedule_hour' ); }
+	public static function get_request_budget()    { return (int) self::get( 'request_budget' ); }
+	public static function get_request_delay_ms()  { return (int) self::get( 'request_delay_ms' ); }
+	public static function get_pages_per_chunk()   { return (int) self::get( 'pages_per_chunk' ); }
+	public static function get_chunk_delay_seconds() { return (int) self::get( 'chunk_delay_seconds' ); }
+	public static function get_schedule_hour()     { return (int) self::get( 'schedule_hour' ); }
 	public static function get_schedule_minute()  { return (int) self::get( 'schedule_minute' ); }
 	public static function get_items_per_page()   { return (int) self::get( 'items_per_page' ); }
 	public static function get_default_photo_id() { return (int) self::get( 'default_photo_attachment_id' ); }

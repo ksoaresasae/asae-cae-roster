@@ -8,6 +8,21 @@
 	margin-bottom: 0;
 }
 
+/* Version badge sitting next to the page title (matches asae-taxonomy-organizer
+   convention: small pill, AA contrast on white admin chrome). */
+.asae-cae-version-badge {
+	display: inline-block;
+	margin-left: 0.6em;
+	padding: 2px 8px;
+	font-size: 12px;
+	font-weight: 600;
+	color: #2271b1;
+	background: #f0f6fc;
+	border: 1px solid #c5d9ed;
+	border-radius: 9999px;
+	vertical-align: middle;
+}
+
 .asae-cae-wrap .nav-tab-wrapper {
 	margin-top: 1em;
 }
@@ -83,6 +98,20 @@
 	color: #50575e;
 	font-size: 13px;
 	font-style: italic;
+}
+
+/* Dry-run results table (Roster tab). */
+.asae-cae-dry-run-results {
+	margin-top: 1em;
+}
+.asae-cae-dry-run-table th,
+.asae-cae-dry-run-table td {
+	padding: 0.5em 0.75em;
+	vertical-align: top;
+}
+.asae-cae-dry-run-suffix {
+	color: #50575e;
+	font-weight: 400;
 }
 
 .asae-cae-error-detail {

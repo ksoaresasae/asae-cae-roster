@@ -258,6 +258,95 @@
 		});
 	}
 
+	// ── Dry Run (preview first 50 alphabetically) ────────────────────────────
+
+	var dryRunBtn = $('asae-cae-dry-run');
+	if (dryRunBtn) {
+		dryRunBtn.addEventListener('click', function () {
+			var stat    = $('asae-cae-dry-run-status');
+			var results = $('asae-cae-dry-run-results');
+			dryRunBtn.disabled = true;
+			setStatus(stat, S.dryRunStart, 'busy');
+
+			postAjax('asae_cae_dry_run')
+				.then(function (data) {
+					if (data && data.success && data.data && Array.isArray(data.data.rows)) {
+						setStatus(stat, data.data.message || S.dryRunOk, 'ok');
+						renderDryRunResults(results, data.data.rows);
+					} else {
+						setStatus(stat, (data && data.data && data.data.message) || S.dryRunError, 'err');
+					}
+				})
+				.catch(function () { setStatus(stat, S.dryRunError, 'err'); })
+				.then(function () { dryRunBtn.disabled = false; });
+		});
+	}
+
+	function renderDryRunResults(container, rows) {
+		if (!container) { return; }
+		if (!rows.length) {
+			container.innerHTML = '<p><em>No CAE records returned.</em></p>';
+			container.hidden = false;
+			return;
+		}
+
+		// Build table via DOM (not innerHTML) so we don't have to escape strings
+		// manually — textContent handles it.
+		container.innerHTML = '';
+		var table = document.createElement('table');
+		table.className = 'widefat striped asae-cae-dry-run-table';
+
+		var thead = document.createElement('thead');
+		thead.innerHTML =
+			'<tr>' +
+			'<th scope="col">#</th>' +
+			'<th scope="col">Name</th>' +
+			'<th scope="col">Title</th>' +
+			'<th scope="col">Organization</th>' +
+			'<th scope="col">Location</th>' +
+			'</tr>';
+		table.appendChild(thead);
+
+		var tbody = document.createElement('tbody');
+		rows.forEach(function (r, i) {
+			var tr = document.createElement('tr');
+
+			var tdNum = document.createElement('td');
+			tdNum.textContent = String(i + 1);
+			tr.appendChild(tdNum);
+
+			var tdName = document.createElement('td');
+			var name = r.full_name || ((r.given_name || '') + ' ' + (r.family_name || '')).trim();
+			tdName.textContent = name;
+			if (r.honorific_suffix) {
+				var suf = document.createElement('span');
+				suf.className = 'asae-cae-dry-run-suffix';
+				suf.textContent = ', ' + r.honorific_suffix;
+				tdName.appendChild(suf);
+			}
+			tr.appendChild(tdName);
+
+			var tdTitle = document.createElement('td');
+			tdTitle.textContent = r.job_title || '';
+			tr.appendChild(tdTitle);
+
+			var tdOrg = document.createElement('td');
+			tdOrg.textContent = r.organization_name || '';
+			tr.appendChild(tdOrg);
+
+			var loc = [r.city, r.state].filter(function (x) { return x; }).join(', ');
+			var tdLoc = document.createElement('td');
+			tdLoc.textContent = loc;
+			tr.appendChild(tdLoc);
+
+			tbody.appendChild(tr);
+		});
+		table.appendChild(tbody);
+
+		container.appendChild(table);
+		container.hidden = false;
+	}
+
 	// ── Stop All Active Jobs ─────────────────────────────────────────────────
 
 	var stopBtn = $('asae-cae-stop-jobs');

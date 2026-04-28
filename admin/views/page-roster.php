@@ -69,7 +69,10 @@ if ( $latest ) {
 }
 ?>
 <div class="wrap asae-cae-wrap">
-	<h1><?php echo esc_html__( 'ASAE CAE Roster', 'asae-cae-roster' ); ?></h1>
+	<h1>
+		<?php echo esc_html__( 'ASAE CAE Roster', 'asae-cae-roster' ); ?>
+		<?php ASAE_CAE_Admin::render_version_badge(); ?>
+	</h1>
 	<?php ASAE_CAE_Admin::render_tabs(); ?>
 
 	<div class="asae-cae-tab-content" role="region" aria-labelledby="asae-cae-roster-heading">
@@ -123,10 +126,6 @@ if ( $latest ) {
 					<th scope="row"><?php echo esc_html__( 'Next scheduled sync', 'asae-cae-roster' ); ?></th>
 					<td><?php echo esc_html( $next_run ); ?></td>
 				</tr>
-				<tr>
-					<th scope="row"><?php echo esc_html__( 'Plugin version', 'asae-cae-roster' ); ?></th>
-					<td><code>v<?php echo esc_html( ASAE_CAE_VERSION ); ?></code></td>
-				</tr>
 			</tbody>
 		</table>
 
@@ -171,12 +170,16 @@ if ( $latest ) {
 		</p>
 
 		<p>
-			<button type="button" class="button" id="asae-cae-check-updates"
-					aria-describedby="asae-cae-updates-status">
-				<?php echo esc_html__( 'Check for Updates Now', 'asae-cae-roster' ); ?>
+			<button type="button" class="button" id="asae-cae-dry-run"
+					aria-describedby="asae-cae-dry-run-status"
+					<?php disabled( ! $is_configured ); ?>>
+				<?php echo esc_html__( 'Dry Run (Preview First 50)', 'asae-cae-roster' ); ?>
 			</button>
-			<span id="asae-cae-updates-status" role="status" aria-live="polite" class="asae-cae-status-msg"></span>
+			<span id="asae-cae-dry-run-status" role="status" aria-live="polite" class="asae-cae-status-msg"></span>
 		</p>
+
+		<div id="asae-cae-dry-run-results" class="asae-cae-dry-run-results" hidden
+				aria-live="polite" aria-atomic="false"></div>
 
 		<h2><?php echo esc_html__( 'How to display the roster', 'asae-cae-roster' ); ?></h2>
 		<p><?php echo esc_html__( 'Add this shortcode to any page or post:', 'asae-cae-roster' ); ?></p>

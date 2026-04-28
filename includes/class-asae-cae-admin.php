@@ -48,6 +48,7 @@ class ASAE_CAE_Admin {
 		add_action( 'wp_ajax_asae_cae_run_sync',       array( __CLASS__, 'ajax_run_sync' ) );
 		add_action( 'wp_ajax_asae_cae_stop_jobs',      array( __CLASS__, 'ajax_stop_jobs' ) );
 		add_action( 'wp_ajax_asae_cae_get_progress',   array( __CLASS__, 'ajax_get_progress' ) );
+		add_action( 'wp_ajax_asae_cae_dry_run',        array( __CLASS__, 'ajax_dry_run' ) );
 	}
 
 	/**
@@ -136,6 +137,9 @@ class ASAE_CAE_Admin {
 					'pickPhotoButton'  => __( 'Use this photo', 'asae-cae-roster' ),
 					'progressRunning'  => __( 'Running…', 'asae-cae-roster' ),
 					'progressOf'       => __( '%1$d of %2$d — %3$s', 'asae-cae-roster' ),
+					'dryRunStart'      => __( 'Pulling preview…', 'asae-cae-roster' ),
+					'dryRunOk'         => __( 'Preview ready below.', 'asae-cae-roster' ),
+					'dryRunError'      => __( 'Dry run failed.', 'asae-cae-roster' ),
 				),
 			)
 		);
@@ -163,6 +167,20 @@ class ASAE_CAE_Admin {
 		$page_url    = admin_url( 'admin.php?page=' . self::MENU_SLUG );
 
 		require $view;
+	}
+
+	/**
+	 * Output a small version badge to sit alongside an admin <h1>. Matches the
+	 * convention used by other ASAE plugins (e.g. asae-taxonomy-organizer).
+	 *
+	 * @return void
+	 */
+	public static function render_version_badge(): void {
+		printf(
+			'<span class="asae-cae-version-badge" aria-label="%1$s">v%2$s</span>',
+			esc_attr( sprintf( /* translators: %s: version */ __( 'Plugin version %s', 'asae-cae-roster' ), ASAE_CAE_VERSION ) ),
+			esc_html( ASAE_CAE_VERSION )
+		);
 	}
 
 	/**
@@ -347,6 +365,33 @@ class ASAE_CAE_Admin {
 				'count'        => ASAE_CAE_DB::count_live(),
 				'last_status'  => $latest ? (string) $latest->status : null,
 				'last_error'   => $latest && ! empty( $latest->error_message ) ? (string) $latest->error_message : '',
+			)
+		);
+	}
+
+	/**
+	 * Run a no-DB-write preview pulling the first 50 active CAEs alphabetically.
+	 * Returns normalized rows so the Roster tab can render them in a table for
+	 * review without affecting the staging or live tables.
+	 *
+	 * @return void
+	 */
+	public static function ajax_dry_run(): void {
+		self::verify_ajax();
+		$result = ASAE_CAE_Sync::dry_run( 50 );
+		if ( ! empty( $result['ok'] ) ) {
+			wp_send_json_success(
+				array(
+					'message'       => $result['message'],
+					'rows'          => $result['rows'],
+					'requests_made' => (int) $result['requests_made'],
+				)
+			);
+		}
+		wp_send_json_error(
+			array(
+				'message'       => $result['message'],
+				'requests_made' => (int) $result['requests_made'],
 			)
 		);
 	}

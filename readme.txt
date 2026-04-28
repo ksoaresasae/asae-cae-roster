@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.3
+Stable tag: 0.0.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,15 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.4 =
+* Sync is now broken into many small WP-Cron-driven chunks instead of one long blocking call. Each chunk fetches a small number of Wicket pages (default 1 page = 25 records) and self-schedules the next chunk after a configurable delay (default 5s). Resumable across PHP-process boundaries; live data isn't promoted until every chunk is complete. Fixes the "Per-run request budget reached (500)" failure mode for rosters of ~5,000 CAEs.
+* New "Dry Run (Preview First 50)" admin action — fetches the first 50 active CAEs alphabetically (sort=family_name) and renders them in a table on the Roster tab. No DB writes, no effect on the live or staging tables.
+* Plugin version moved from the Roster tab's status table to a small badge next to the page title, visible on every tab (matches the convention used by other ASAE plugins).
+* "Check for Updates Now" moved from the Roster tab to the Settings tab, again matching the convention used by other ASAE plugins.
+* Added two new Settings fields under "Chunked sync": Pages per chunk (default 1) and Delay between chunks in seconds (default 5). The existing "Max requests per chunk" / "Delay between requests" labels were clarified to indicate they're now per-chunk caps.
+* Stop All Active Jobs now also clears the in-progress chunk state and unschedules any pending single-event chunks — so a stopped run truly stops, even if a chunk was queued to fire seconds later.
+* Stale-run recovery now uses chunk_state.updated_at instead of started_at, so a healthy chunked sync that runs longer than 30 minutes isn't mistakenly aborted.
 
 = 0.0.3 =
 * Photos are no longer sideloaded into the WordPress media library. Sync stores the remote Wicket photo URL only; the public shortcode renders each <img> with native lazy-loading and a data-fallback attribute. A small client-side handler swaps the src to the admin-configured default photo when a remote image returns 404 or otherwise fails to load. This eliminates ~5,000 image downloads per sync and ~5,000 attachment rows per snapshot.

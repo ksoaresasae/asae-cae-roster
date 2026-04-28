@@ -20,7 +20,10 @@ $default_photo_url = ASAE_CAE_Settings::get_default_photo_url();
 $default_photo_id  = (int) $s['default_photo_attachment_id'];
 ?>
 <div class="wrap asae-cae-wrap">
-	<h1><?php echo esc_html__( 'ASAE CAE Roster', 'asae-cae-roster' ); ?></h1>
+	<h1>
+		<?php echo esc_html__( 'ASAE CAE Roster', 'asae-cae-roster' ); ?>
+		<?php ASAE_CAE_Admin::render_version_badge(); ?>
+	</h1>
 	<?php ASAE_CAE_Admin::render_tabs(); ?>
 
 	<form id="asae-cae-settings-form" class="asae-cae-tab-content" role="region" aria-labelledby="asae-cae-settings-heading">
@@ -173,16 +176,56 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 			</tbody>
 		</table>
 
-		<h3><?php echo esc_html__( 'Rate limiting', 'asae-cae-roster' ); ?></h3>
+		<h3><?php echo esc_html__( 'Chunked sync', 'asae-cae-roster' ); ?></h3>
 		<p class="description">
-			<?php echo esc_html__( 'These caps protect Wicket and other plugins from being starved of API capacity by this sync.', 'asae-cae-roster' ); ?>
+			<?php echo esc_html__( 'A full sync is broken into many small chunks scheduled via WP-Cron, instead of one long blocking call. Smaller chunks + longer delays = lighter load on Wicket.', 'asae-cae-roster' ); ?>
 		</p>
 
 		<table class="form-table" role="presentation">
 			<tbody>
 				<tr>
 					<th scope="row">
-						<label for="asae-cae-request-budget"><?php echo esc_html__( 'Max requests per sync', 'asae-cae-roster' ); ?></label>
+						<label for="asae-cae-pages-per-chunk"><?php echo esc_html__( 'Pages per chunk', 'asae-cae-roster' ); ?></label>
+					</th>
+					<td>
+						<input type="number" id="asae-cae-pages-per-chunk" name="settings[pages_per_chunk]"
+							min="1" max="50" inputmode="numeric"
+							value="<?php echo esc_attr( $s['pages_per_chunk'] ); ?>"
+							class="small-text"
+							aria-describedby="asae-cae-pages-per-chunk-help" />
+						<p id="asae-cae-pages-per-chunk-help" class="description">
+							<?php echo esc_html__( 'Each Wicket page = 25 records. Default 1 (= 25 records per chunk).', 'asae-cae-roster' ); ?>
+						</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">
+						<label for="asae-cae-chunk-delay"><?php echo esc_html__( 'Delay between chunks (seconds)', 'asae-cae-roster' ); ?></label>
+					</th>
+					<td>
+						<input type="number" id="asae-cae-chunk-delay" name="settings[chunk_delay_seconds]"
+							min="1" max="600" inputmode="numeric"
+							value="<?php echo esc_attr( $s['chunk_delay_seconds'] ); ?>"
+							class="small-text"
+							aria-describedby="asae-cae-chunk-delay-help" />
+						<p id="asae-cae-chunk-delay-help" class="description">
+							<?php echo esc_html__( 'How long the next chunk waits before WP-Cron schedules it. Default 5.', 'asae-cae-roster' ); ?>
+						</p>
+					</td>
+				</tr>
+			</tbody>
+		</table>
+
+		<h3><?php echo esc_html__( 'Rate limiting (per chunk)', 'asae-cae-roster' ); ?></h3>
+		<p class="description">
+			<?php echo esc_html__( 'These caps apply within a single chunk, not across the whole sync. They protect Wicket and other plugins from being starved of API capacity.', 'asae-cae-roster' ); ?>
+		</p>
+
+		<table class="form-table" role="presentation">
+			<tbody>
+				<tr>
+					<th scope="row">
+						<label for="asae-cae-request-budget"><?php echo esc_html__( 'Max requests per chunk', 'asae-cae-roster' ); ?></label>
 					</th>
 					<td>
 						<input type="number" id="asae-cae-request-budget" name="settings[request_budget]"
@@ -191,7 +234,7 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 							class="small-text"
 							aria-describedby="asae-cae-request-budget-help" />
 						<p id="asae-cae-request-budget-help" class="description">
-							<?php echo esc_html__( 'Sync aborts cleanly when this is reached. Default: 500.', 'asae-cae-roster' ); ?>
+							<?php echo esc_html__( 'A single chunk that hits this cap aborts cleanly; the run resumes from the next page on its next scheduled chunk.', 'asae-cae-roster' ); ?>
 						</p>
 					</td>
 				</tr>
@@ -206,7 +249,7 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 							class="small-text"
 							aria-describedby="asae-cae-request-delay-help" />
 						<p id="asae-cae-request-delay-help" class="description">
-							<?php echo esc_html__( 'Default: 250 ms. Set to 0 only on isolated dev sites.', 'asae-cae-roster' ); ?>
+							<?php echo esc_html__( 'Courtesy pause between Wicket calls inside a single chunk. Default: 250 ms.', 'asae-cae-roster' ); ?>
 						</p>
 					</td>
 				</tr>
@@ -219,6 +262,18 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 				<?php echo esc_html__( 'Save Settings', 'asae-cae-roster' ); ?>
 			</button>
 			<span id="asae-cae-save-status" role="status" aria-live="polite" class="asae-cae-status-msg"></span>
+		</p>
+
+		<h3><?php echo esc_html__( 'Plugin updates', 'asae-cae-roster' ); ?></h3>
+		<p class="description">
+			<?php echo esc_html__( 'Forces an immediate check against the GitHub Releases endpoint, bypassing the 6-hour transient cache.', 'asae-cae-roster' ); ?>
+		</p>
+		<p>
+			<button type="button" class="button" id="asae-cae-check-updates"
+					aria-describedby="asae-cae-updates-status">
+				<?php echo esc_html__( 'Check for Updates Now', 'asae-cae-roster' ); ?>
+			</button>
+			<span id="asae-cae-updates-status" role="status" aria-live="polite" class="asae-cae-status-msg"></span>
 		</p>
 	</form>
 </div>
