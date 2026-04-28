@@ -133,6 +133,12 @@
 	var pollTimer = null;
 	var pollIntervalMs = (asaeCaeAdmin.pollIntervalMs > 0) ? asaeCaeAdmin.pollIntervalMs : 3000;
 
+	// True while a JS-driven chunk loop is in flight. Used by the progress
+	// poller (and the visibilitychange handler) to know whether to auto-resume
+	// the loop or leave it alone — without this guard we'd double-invoke
+	// runChunkUntilDone every poll tick and race chunks on top of each other.
+	var chunkLoopActive = false;
+
 	function showProgressPanel() {
 		if (progressPanel) { progressPanel.hidden = false; }
 	}
@@ -180,6 +186,17 @@
 				if (d.is_running && d.progress) {
 					showProgressPanel();
 					paintProgress(d.progress);
+
+					// Auto-resume: if a sync is in progress but no JS chunk
+					// loop is currently driving it (e.g. the user opened the
+					// tab while a sync was already running, or the loop got
+					// throttled to a halt by a hidden tab), kick the loop
+					// back on. The chunkLoopActive guard prevents duplicate
+					// loops from racing.
+					if (!chunkLoopActive) {
+						var statEl = $('asae-cae-sync-status');
+						runChunkUntilDone(statEl);
+					}
 				} else {
 					// Sync ended (success, fail, or aborted) — reflect final state
 					// in the live record count and hide the panel.
@@ -219,6 +236,19 @@
 		startProgressPolling();
 	}
 
+	// Browsers aggressively throttle setTimeout/setInterval in hidden tabs
+	// (Chrome clamps to once-per-minute after 5 minutes hidden), which slows
+	// the chunk loop to a crawl. When the tab becomes visible again, fire one
+	// progress poll immediately — this both refreshes the UI and triggers the
+	// auto-resume path inside fetchProgressOnce if the loop has stalled.
+	if (typeof document.addEventListener === 'function') {
+		document.addEventListener('visibilitychange', function () {
+			if (document.visibilityState === 'visible') {
+				fetchProgressOnce();
+			}
+		});
+	}
+
 	// ── Sync Now ─────────────────────────────────────────────────────────────
 	//
 	// JS drives the entire chunk loop client-side. The PHP layer also schedules
@@ -256,12 +286,22 @@
 	 * wherever the chunk_state currently sits.
 	 */
 	function runChunkUntilDone(statEl) {
+		// Refuse to start a second loop while one is already running. This
+		// makes the function safe to call from anywhere — Sync Now click,
+		// progress poller auto-resume, visibilitychange — without a
+		// chunkLoopActive guard at every call site.
+		if (chunkLoopActive) {
+			return Promise.resolve();
+		}
+		chunkLoopActive = true;
+
 		var delayMs = ((asaeCaeAdmin.chunkDelaySeconds || 5) + 1) * 1000;
 
 		function step() {
 			return postAjax('asae_cae_run_sync').then(function (data) {
 				if (!data || !data.success || !data.data) {
 					setStatus(statEl, (data && data.data && data.data.message) || S.syncError, 'err');
+					chunkLoopActive = false;
 					return;
 				}
 				var d = data.data;
@@ -283,8 +323,10 @@
 				// Sync finalized (success / fail / abort). Show whatever the
 				// server's final message was.
 				setStatus(statEl, d.message || '', 'ok');
+				chunkLoopActive = false;
 			}).catch(function () {
 				setStatus(statEl, S.syncError, 'err');
+				chunkLoopActive = false;
 			});
 		}
 

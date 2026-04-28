@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.11
+Stable tag: 0.0.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.12 =
+* Fix: chunked sync was getting "Run abandoned: chunk state stalled past the recovery threshold" overnight on local dev environments where WP-Cron's loopback to wp-cron.php is unreliable (Herd's NGINX/PHP-FPM, etc.). Lengthened ASAE_CAE_Sync::STALE_RUN_SECONDS from 30 minutes to 12 hours. The 30-minute threshold was treating "no traffic for 30 minutes" as a wedged run and aborting it; on hosts where cron events only fire when a page request happens, that threshold was incompatible with closed-laptop / inactive-tab gaps. 12 hours still cleans up genuine PHP-crash wreckage by morning, but lets a quiet-but-legit run resume the next time someone opens the dashboard. (Production hosts with steady frontend traffic were unaffected — this only bit local dev.)
+* Browser tab throttling defense: when the Roster tab regains visibility (visibilitychange event), the admin JS immediately fires one progress poll and auto-resumes the chunk loop if a sync is still in progress. Chrome clamps setTimeout/setInterval to once-per-minute in tabs hidden longer than 5 minutes, which had been slowing the JS-driven chunk loop to a crawl when the user switched away. Tab-back now snaps it out of the throttle within one HTTP round-trip.
+* Auto-resume from progress polling: if the polling tick sees a sync running and no JS chunk loop is currently driving it (e.g. user closed the laptop, came back, opened the dashboard fresh), the poller kicks off runChunkUntilDone automatically. Previously you had to click Sync Now again. A new chunkLoopActive flag prevents double-invocation when the poller and a manual click race.
 
 = 0.0.11 =
 * Sync Now now drives the entire chunked sync from the browser tab via repeated AJAX calls instead of relying on WP-Cron to fire each successive chunk. WP-Cron's loopback POST to wp-cron.php is unreliable on a lot of local dev environments (including Herd's NGINX/PHP-FPM out of the box), which had been leaving syncs stuck after the first chunk on those hosts. The JS-driven loop calls ajax_run_sync, waits the configured chunk_delay_seconds, and calls again — until the server reports in_progress=false. Wicket sees the same gentle one-page-every-5-seconds traffic pattern as before. The daily 02:00 sync still uses WP-Cron (which works fine in production WP environments).

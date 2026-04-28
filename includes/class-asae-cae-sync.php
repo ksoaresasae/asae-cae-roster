@@ -64,8 +64,16 @@ class ASAE_CAE_Sync {
 	/** Wicket JSON:API page size. 25 is the platform default. */
 	const PAGE_SIZE = 25;
 
-	/** A 'running' log row whose chunk state hasn't updated in this long is treated as wedged. */
-	const STALE_RUN_SECONDS = 30 * MINUTE_IN_SECONDS;
+	/** A 'running' log row whose chunk state hasn't updated in this long is
+	 * treated as wedged.
+	 *
+	 * Set generously (12 hours) because the right behaviour for a
+	 * "no-traffic, no-admin-tab" stretch is to RESUME on the next page load,
+	 * not to abort. WP-Cron events fire only when something requests a page,
+	 * so on local dev environments without continuous traffic the chunk_state
+	 * can legitimately sit idle for hours. Real PHP crashes (orphaned state
+	 * with no scheduled successor) still get cleaned up overnight. */
+	const STALE_RUN_SECONDS = 12 * HOUR_IN_SECONDS;
 
 	/**
 	 * Register the cron action so WP knows what to call when the event fires.

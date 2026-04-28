@@ -3,7 +3,7 @@
  * Plugin Name:       ASAE CAE Roster
  * Plugin URI:        https://github.com/ksoaresasae/asae-cae-roster
  * Description:       Pull the full list of CAEs (Certified Association Executives) from a Wicket datasource and render them as a paginated, searchable, last-name-organized public roster via the [asae_cae_roster] shortcode.
- * Version:           0.0.11
+ * Version:           0.0.12
  * Author:            Keith M. Soares
  * Author URI:        https://keithmsoares.com
  * License:           GPL-2.0+
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // ── Plugin Constants ──────────────────────────────────────────────────────────
 
-define( 'ASAE_CAE_VERSION', '0.0.11' );
+define( 'ASAE_CAE_VERSION', '0.0.12' );
 define( 'ASAE_CAE_PATH', plugin_dir_path( __FILE__ ) );
 define( 'ASAE_CAE_URL', plugin_dir_url( __FILE__ ) );
 define( 'ASAE_CAE_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
