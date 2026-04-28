@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.6
+Stable tag: 0.0.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.7 =
+* Check for Updates now distinguishes "no GitHub releases tagged yet" (cure-able by `git tag vX.Y.Z && git push origin vX.Y.Z`) from "couldn't reach api.github.com." Settings tab message is actionable instead of misleading.
+* Dry Run is now self-debugging when the primary filter returns zero. After the existing baseline GET probe, it also runs (a) a "self-record" probe that fetches the configured Wicket person UUID's own /people/{uuid} record and shows the actual data_fields keys + the full designations entry, and (b) six filter-variant probes (no filter, status_eq only, four different data_fields path/predicate combinations) and reports total_items for each. Whichever variant returns >0 is the syntax we should use. Net result: one click pinpoints exactly which path/predicate Wicket honors, no further code-iteration guessing.
+* The probes are diagnostic only; they fire only when the primary filter returns zero, so a working dry run still costs one API call.
 
 = 0.0.6 =
 * Check for Updates Now now reports its findings inline (matches asae-content-ingestor's pattern). When a newer release is found on GitHub the Settings tab shows "Update available: vX.Y.Z — Go to Plugins page" in red with a working link; otherwise it shows "You are running the latest version (vX.Y.Z)" in green. The previous behavior — generic "Update check complete, refresh the Plugins page" — gave no signal whether anything was actually pending.

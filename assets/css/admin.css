@@ -148,6 +148,19 @@
 	overflow-x: auto;
 	max-height: 280px;
 }
+.asae-cae-probe-wrap {
+	margin-top: 0.8em;
+}
+.asae-cae-probe-table th,
+.asae-cae-probe-table td {
+	padding: 0.4em 0.6em;
+	font-size: 12px;
+	vertical-align: top;
+}
+.asae-cae-probe-hit {
+	color: #00692e;
+	font-weight: 700;
+}
 
 .asae-cae-error-detail {
 	margin-top: 4px;

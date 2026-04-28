@@ -351,6 +351,58 @@
 				addRow('Baseline GET /people?page[size]=3', baselineMsg);
 			}
 
+			// Self-record probe — the configured API-user's own data_fields
+			// shape, taken from /people/{configured-uuid}. Best single source
+			// of truth for what the actual schema_slug + field names look like.
+			if (meta.self_probe) {
+				var sp = meta.self_probe;
+				if (sp.error) {
+					addRow('Self-record probe (GET /people/{configured-uuid})', 'error: ' + sp.error);
+				} else {
+					addRow(
+						'Self-record probe (GET /people/{configured-uuid})',
+						'family_name=' + (sp.family_name || '') +
+						', given_name=' + (sp.given_name || '') +
+						', status=' + (sp.status || '') +
+						', data_fields keys: [' + (sp.data_fields_keys || []).join(', ') + ']'
+					);
+					if (sp.designations) {
+						addRow('Self-record designations entry', sp.designations);
+					}
+				}
+			}
+
+			// Filter probes — table form for clarity.
+			if (meta.filter_probes && meta.filter_probes.length) {
+				var probeWrap = document.createElement('div');
+				probeWrap.className = 'asae-cae-probe-wrap';
+				var probeHeading = document.createElement('p');
+				probeHeading.innerHTML = '<strong>Filter probes:</strong>';
+				probeWrap.appendChild(probeHeading);
+
+				var ptable = document.createElement('table');
+				ptable.className = 'widefat striped asae-cae-probe-table';
+				ptable.innerHTML = '<thead><tr><th>Variant</th><th class="num">total_items</th><th>error</th></tr></thead>';
+				var ptbody = document.createElement('tbody');
+				meta.filter_probes.forEach(function (p) {
+					var tr = document.createElement('tr');
+					var t1 = document.createElement('td'); t1.textContent = p.label || '';
+					var t2 = document.createElement('td'); t2.className = 'num';
+					if (p.total_items === null || typeof p.total_items === 'undefined') {
+						t2.textContent = '—';
+					} else {
+						t2.textContent = String(p.total_items);
+						if (p.total_items > 0) { t2.classList.add('asae-cae-probe-hit'); }
+					}
+					var t3 = document.createElement('td'); t3.textContent = p.error || '';
+					tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3);
+					ptbody.appendChild(tr);
+				});
+				ptable.appendChild(ptbody);
+				probeWrap.appendChild(ptable);
+				det.appendChild(probeWrap);
+			}
+
 			container.appendChild(det);
 		}
 
@@ -462,7 +514,17 @@
 					var d = data.data;
 
 					if (!d.latest_version) {
-						setStatus(stat, S.updateUnknown, 'err');
+						// Differentiate "no releases tagged yet" (cure-able via git tag)
+						// from "couldn't reach GitHub" (transient network).
+						if (d.no_releases) {
+							setStatus(
+								stat,
+								S.updateNoReleases.replace(/%s/g, d.current_version),
+								'err'
+							);
+						} else {
+							setStatus(stat, S.updateUnknown, 'err');
+						}
 						return;
 					}
 

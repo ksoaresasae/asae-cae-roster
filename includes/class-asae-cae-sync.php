@@ -506,21 +506,21 @@ class ASAE_CAE_Sync {
 
 		$raw_count = count( $data_acc );
 
-		// Diagnostic baseline: when the primary filter returned 0 records,
-		// confirm whether the tenant has data at all. A successful baseline
-		// pinpoints the filter as the problem; a failing baseline points at
-		// auth/endpoint/empty-tenant.
+		// When the primary filter returned 0 records, run a battery of
+		// diagnostic probes so we can see what's actually going on without
+		// another code-edit cycle.
 		$baseline_count = null;
+		$filter_probes  = null;
+		$self_probe     = null;
 		if ( 0 === $raw_count ) {
 			try {
-				$baseline = $client->request(
-					'people',
-					array( 'page[size]' => 3 )
-				);
+				$baseline       = $client->request( 'people', array( 'page[size]' => 3 ) );
 				$baseline_count = isset( $baseline['data'] ) ? count( (array) $baseline['data'] ) : 0;
 			} catch ( ASAE_CAE_Wicket_Exception $e ) {
 				$baseline_count = -1; // signals "baseline call also threw"
 			}
+			$filter_probes = self::run_filter_probes();
+			$self_probe    = self::run_self_probe();
 		}
 
 		// Normalize → keep records that pass our (now-loose) structural validation.
@@ -571,6 +571,154 @@ class ASAE_CAE_Sync {
 			'response_keys'  => is_array( $first_resp ) ? array_keys( $first_resp ) : array(),
 			'response_meta'  => is_array( $first_resp ) && isset( $first_resp['meta'] ) ? $first_resp['meta'] : null,
 			'baseline_count' => $baseline_count,
+			'filter_probes'  => $filter_probes,
+			'self_probe'     => $self_probe,
+		);
+	}
+
+	// ── Diagnostic probes (called only when the primary filter returns 0) ──
+
+	/**
+	 * Try a battery of candidate filter shapes and report which (if any)
+	 * matched any records on the tenant. Each probe uses page[size]=1 so the
+	 * round-trip cost is minimal even on rosters with thousands of CAEs.
+	 *
+	 * @return array<int, array{label:string, total_items:int|null, error:string|null, body:array}>
+	 */
+	private static function run_filter_probes() {
+		// Generous budget, no inter-request delay — diagnostic only.
+		$client = new ASAE_CAE_Wicket_Client( null, null, null, 30, 0 );
+
+		$today = current_time( 'Y-m-d' );
+
+		$variants = array(
+			array(
+				'label' => 'POST /people/query, no filter (sanity check)',
+				'body'  => array( 'filter' => new stdClass() ),
+			),
+			array(
+				'label' => 'POST /people/query, filter.status_eq = "active" (top-level only)',
+				'body'  => array( 'filter' => array( 'status_eq' => 'active' ) ),
+			),
+			array(
+				'label' => 'POST /people/query, search_query data_fields.designations.value.cae = true',
+				'body'  => array(
+					'filter' => array(
+						'search_query' => array(
+							'_and' => array(
+								array( 'data_fields.designations.value.cae' => true ),
+							),
+						),
+					),
+				),
+			),
+			array(
+				'label' => 'POST /people/query, search_query data_fields.designations.value.cae_eq = true (explicit predicate)',
+				'body'  => array(
+					'filter' => array(
+						'search_query' => array(
+							'_and' => array(
+								array( 'data_fields.designations.value.cae_eq' => true ),
+							),
+						),
+					),
+				),
+			),
+			array(
+				'label' => 'POST /people/query, search_query data_fields.designations.cae = true (no .value segment)',
+				'body'  => array(
+					'filter' => array(
+						'search_query' => array(
+							'_and' => array(
+								array( 'data_fields.designations.cae' => true ),
+							),
+						),
+					),
+				),
+			),
+			array(
+				'label' => 'POST /people/query, search_query data_fields.designations.value.cae_type = "cae" (string equality)',
+				'body'  => array(
+					'filter' => array(
+						'search_query' => array(
+							'_and' => array(
+								array( 'data_fields.designations.value.cae_type' => 'cae' ),
+							),
+						),
+					),
+				),
+			),
+		);
+
+		$out = array();
+		foreach ( $variants as $v ) {
+			$res = array( 'label' => $v['label'], 'total_items' => null, 'error' => null, 'body' => $v['body'] );
+			try {
+				$resp = $client->request_post( 'people/query', array( 'page[size]' => 1 ), $v['body'] );
+				$res['total_items'] = isset( $resp['meta']['page']['total_items'] )
+					? (int) $resp['meta']['page']['total_items']
+					: ( isset( $resp['data'] ) ? count( (array) $resp['data'] ) : 0 );
+			} catch ( ASAE_CAE_Wicket_Exception $e ) {
+				$res['error'] = $e->getMessage();
+			}
+			$out[] = $res;
+		}
+		return $out;
+	}
+
+	/**
+	 * Fetch the configured Wicket person UUID's own /people/{uuid} record so
+	 * we can see the actual data_fields structure on a known-real account
+	 * (the API user is themselves a CAE on this tenant). Used to confirm the
+	 * exact schema_slug and field names without guesswork.
+	 *
+	 * @return array
+	 */
+	private static function run_self_probe() {
+		$person_id = ASAE_CAE_Settings::get_person_id();
+		if ( '' === $person_id ) {
+			return array( 'error' => 'No configured Wicket person UUID.' );
+		}
+
+		$client = new ASAE_CAE_Wicket_Client( null, null, null, 5, 0 );
+		try {
+			$resp = $client->request( 'people/' . rawurlencode( $person_id ) );
+		} catch ( ASAE_CAE_Wicket_Exception $e ) {
+			return array( 'error' => $e->getMessage() );
+		}
+
+		$person = isset( $resp['data'] ) ? $resp['data'] : null;
+		if ( ! is_array( $person ) ) {
+			return array( 'error' => 'Unexpected response shape (no data).' );
+		}
+
+		$attrs       = isset( $person['attributes'] ) ? (array) $person['attributes'] : array();
+		$data_fields = isset( $attrs['data_fields'] ) ? $attrs['data_fields'] : null;
+
+		$df_keys           = array();
+		$designations_full = null;
+		if ( is_array( $data_fields ) ) {
+			foreach ( $data_fields as $df ) {
+				if ( ! is_array( $df ) ) {
+					continue;
+				}
+				$key      = $df['key'] ?? ( $df['schema_slug'] ?? '?' );
+				$df_keys[] = (string) $key;
+				if ( $key === 'designations' ) {
+					$designations_full = $df;
+				}
+			}
+		}
+
+		return array(
+			'person_uuid'         => $person_id,
+			'family_name'         => (string) ( $attrs['family_name'] ?? '' ),
+			'given_name'          => (string) ( $attrs['given_name'] ?? '' ),
+			'status'              => (string) ( $attrs['status'] ?? '' ),
+			'tags'                => isset( $attrs['tags'] ) ? (array) $attrs['tags'] : array(),
+			'data_fields_present' => is_array( $data_fields ),
+			'data_fields_keys'    => $df_keys,
+			'designations'        => $designations_full,
 		);
 	}
 

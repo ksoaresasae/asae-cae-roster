@@ -134,7 +134,8 @@ class ASAE_CAE_Admin {
 					'updateAvailable'  => __( 'Update available: v%1$s — %2$s', 'asae-cae-roster' ),
 					'updateLink'       => __( 'Go to Plugins page', 'asae-cae-roster' ),
 					'updateNone'       => __( 'You are running the latest version (v%s).', 'asae-cae-roster' ),
-					'updateUnknown'    => __( 'Could not read the latest release from GitHub.', 'asae-cae-roster' ),
+					'updateNoReleases' => __( 'No GitHub releases found yet. Tag a version (e.g. `git tag v%s && git push origin v%s`) to publish a release; the workflow builds the zip automatically.', 'asae-cae-roster' ),
+					'updateUnknown'    => __( 'Could not contact api.github.com. Check the network or try again in a moment.', 'asae-cae-roster' ),
 					'updatesError'     => __( 'Update check failed. Please try again.', 'asae-cae-roster' ),
 					'pickPhotoTitle'   => __( 'Select default photo', 'asae-cae-roster' ),
 					'pickPhotoButton'  => __( 'Use this photo', 'asae-cae-roster' ),
@@ -270,11 +271,18 @@ class ASAE_CAE_Admin {
 			: null;
 		$update_available = (bool) ( $latest_version && version_compare( $latest_version, ASAE_CAE_VERSION, '>' ) );
 
+		// Distinguish "GitHub repo has no releases yet" (a state cured by
+		// `git tag vX.Y.Z && git push origin vX.Y.Z`) from a real fetch error.
+		// 404 on /releases/latest is the documented response when no releases
+		// exist; the updater caches that as null, so we infer here.
+		$no_releases = ( null === $release && null === $latest_version );
+
 		wp_send_json_success(
 			array(
 				'current_version'  => ASAE_CAE_VERSION,
 				'latest_version'   => $latest_version,
 				'update_available' => $update_available,
+				'no_releases'      => $no_releases,
 				'plugins_url'      => admin_url( 'plugins.php' ),
 				'release_url'      => $release && isset( $release->html_url ) ? (string) $release->html_url : '',
 			)
@@ -419,6 +427,8 @@ class ASAE_CAE_Admin {
 			'response_keys'  => $result['response_keys'] ?? array(),
 			'response_meta'  => $result['response_meta'] ?? null,
 			'baseline_count' => array_key_exists( 'baseline_count', $result ) ? $result['baseline_count'] : null,
+			'filter_probes'  => $result['filter_probes'] ?? null,
+			'self_probe'     => $result['self_probe'] ?? null,
 		);
 		if ( ! empty( $result['ok'] ) ) {
 			wp_send_json_success( $payload );
