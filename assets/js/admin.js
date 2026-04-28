@@ -300,7 +300,10 @@
 				bits.push('Wicket returned ' + meta.raw_count + ' record(s)');
 			}
 			if (typeof meta.accepted_count !== 'undefined') {
-				bits.push(meta.accepted_count + ' passed structural validation');
+				bits.push(meta.accepted_count + ' active');
+			}
+			if (typeof meta.hidden_count !== 'undefined' && meta.hidden_count > 0) {
+				bits.push(meta.hidden_count + ' hidden');
 			}
 			if (typeof meta.requests_made !== 'undefined') {
 				bits.push(meta.requests_made + ' API call(s)');
@@ -407,12 +410,15 @@
 			'<th scope="col">Title</th>' +
 			'<th scope="col">Organization</th>' +
 			'<th scope="col">Location</th>' +
+			'<th scope="col">Status</th>' +
 			'</tr>';
 		table.appendChild(thead);
 
 		var tbody = document.createElement('tbody');
 		rows.forEach(function (r, i) {
 			var tr = document.createElement('tr');
+			var skipReason = (r._skip_reason || '').trim();
+			if (skipReason) { tr.classList.add('is-skipped'); }
 
 			var tdNum = document.createElement('td');
 			tdNum.textContent = String(i + 1);
@@ -441,6 +447,15 @@
 			var tdLoc = document.createElement('td');
 			tdLoc.textContent = loc;
 			tr.appendChild(tdLoc);
+
+			var tdStatus = document.createElement('td');
+			tdStatus.className = 'asae-cae-dry-run-status';
+			if (skipReason) {
+				tdStatus.textContent = 'Hidden — ' + skipReason;
+			} else {
+				tdStatus.textContent = 'Active';
+			}
+			tr.appendChild(tdStatus);
 
 			tbody.appendChild(tr);
 		});

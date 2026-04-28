@@ -113,6 +113,25 @@
 	color: #50575e;
 	font-weight: 400;
 }
+.asae-cae-dry-run-table tr.is-skipped td {
+	color: #50575e;
+}
+.asae-cae-dry-run-table tr.is-skipped td:first-child,
+.asae-cae-dry-run-table tr.is-skipped td:nth-child(2) {
+	text-decoration: line-through;
+}
+.asae-cae-dry-run-table .asae-cae-dry-run-status {
+	font-size: 12px;
+	white-space: nowrap;
+}
+.asae-cae-dry-run-table tr.is-skipped .asae-cae-dry-run-status {
+	color: #b32d2e; /* AA-contrast red, same as .asae-cae-msg-err */
+	font-weight: 600;
+}
+.asae-cae-dry-run-table tr:not(.is-skipped) .asae-cae-dry-run-status {
+	color: #00692e; /* AA-contrast green, same as .asae-cae-msg-ok */
+	font-weight: 600;
+}
 .asae-cae-dry-run-diag {
 	margin: 0 0 0.6em;
 	padding: 0.5em 0.75em;

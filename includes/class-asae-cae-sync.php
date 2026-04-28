@@ -292,7 +292,8 @@ class ASAE_CAE_Sync {
 			}
 
 			$record = self::normalize_person( $person, $orgs_index, $addrs_index, $today );
-			if ( null === $record ) {
+			if ( '' !== (string) ( $record['_skip_reason'] ?? '' ) ) {
+				// Lapsed CAE / deleted / anonymized — counted, not inserted.
 				$state['skipped']++;
 				continue;
 			}
@@ -521,19 +522,17 @@ class ASAE_CAE_Sync {
 			$filter_probes = self::run_filter_probes();
 		}
 
-		// Normalize → keep records that pass our (now-loose) structural validation.
-		// With server-side filtering on data_fields.designations, every returned
-		// record is by definition a currently-active CAE; normalize_person mostly
-		// just shapes the row at this point.
+		// Normalize ALL rows for dry-run display — including the ones that
+		// would be skipped at sync time. The `_skip_reason` field tells the
+		// UI which rows to mark hidden and why, so the user can see "Wicket
+		// returned 50, 5 of them are hidden because they're expired CAEs"
+		// rather than puzzling over an unexplained 50→45 discrepancy.
 		$orgs_index  = self::index_included( $included_acc, 'organizations' );
 		$addrs_index = self::index_included( $included_acc, 'addresses' );
 
 		$rows = array();
 		foreach ( $data_acc as $person ) {
-			$record = self::normalize_person( $person, $orgs_index, $addrs_index, $today );
-			if ( null !== $record ) {
-				$rows[] = $record;
-			}
+			$rows[] = self::normalize_person( $person, $orgs_index, $addrs_index, $today );
 		}
 
 		// Defensive client-side sort by family_name then given_name — Wicket
@@ -552,17 +551,31 @@ class ASAE_CAE_Sync {
 
 		$rows = array_slice( $rows, 0, $limit );
 
+		// Compute accepted vs hidden counts for the diagnostic top line.
+		$accepted_count = 0;
+		$hidden_count   = 0;
+		foreach ( $rows as $r ) {
+			if ( '' === (string) ( $r['_skip_reason'] ?? '' ) ) {
+				$accepted_count++;
+			} else {
+				$hidden_count++;
+			}
+		}
+
 		return array(
 			'ok'             => true,
 			'message'        => sprintf(
-				/* translators: 1: rows returned to UI, 2: raw rows from Wicket */
-				__( 'Dry run: %1$d record(s) shown (Wicket returned %2$d).', 'asae-cae-roster' ),
+				/* translators: 1: rows returned to UI, 2: count active, 3: count hidden, 4: raw rows from Wicket */
+				__( 'Dry run: %1$d record(s) returned (%2$d active, %3$d hidden). Wicket page total: %4$d.', 'asae-cae-roster' ),
 				count( $rows ),
+				$accepted_count,
+				$hidden_count,
 				$raw_count
 			),
 			'rows'           => $rows,
 			'raw_count'      => $raw_count,
-			'accepted_count' => count( $rows ),
+			'accepted_count' => $accepted_count,
+			'hidden_count'   => $hidden_count,
 			'requests_made'  => $client->requests_made(),
 			'endpoint'       => 'POST /people/query',
 			'query_body'     => $body,
@@ -993,32 +1006,28 @@ class ASAE_CAE_Sync {
 
 	/**
 	 * Convert a raw Wicket person resource into a row ready for the staging
-	 * table. Returns null only on hard filters (deleted, anonymized) — the
-	 * "currently-active CAE" check is now server-side via the /people/query
-	 * filter on data_fields.designations.value.cae and end_date_gteq, so a
-	 * record reaching this method has already been vetted upstream.
+	 * table. Always returns an array; the `_skip_reason` field tells callers
+	 * whether the record should be inserted (empty string = accept) or
+	 * displayed-but-skipped (non-empty = reason).
 	 *
-	 * If data_fields is omitted from a list response (some Wicket endpoints
-	 * trim large nested arrays), we still accept the record — photo_url and
-	 * cae_*_date just stay empty rather than rejecting the whole roster entry.
+	 * Skip reasons currently set:
+	 *   - `deleted` — attributes.deleted_at present
+	 *   - `anonymized` — attributes.anonymized_at present
+	 *   - `expired (end_date YYYY-MM-DD)` — designations.value.end_date in the past
+	 *
+	 * Wicket's server-side filter (cae=true AND cae_type="cae") matches every
+	 * person who has the CAE designation, current or lapsed; the end_date
+	 * check has to be client-side because predicate suffixes (`_gteq`) don't
+	 * work on nested data_fields paths inside search_query.
 	 *
 	 * @param array  $person
 	 * @param array  $orgs_index
 	 * @param array  $addrs_index
 	 * @param string $today  Y-m-d in WP local time.
-	 * @return array|null
+	 * @return array
 	 */
 	private static function normalize_person( array $person, array $orgs_index, array $addrs_index, $today ) {
 		$attrs = isset( $person['attributes'] ) ? (array) $person['attributes'] : array();
-
-		// Hard rejects: deleted or anonymized records should never appear in
-		// the public roster, regardless of what the server-side filter said.
-		if ( ! empty( $attrs['deleted_at'] ) ) {
-			return null;
-		}
-		if ( ! empty( $attrs['anonymized_at'] ) ) {
-			return null;
-		}
 
 		// Optional designations data_field — when present, capture the date
 		// range for the cache; when absent, leave dates empty.
@@ -1027,14 +1036,16 @@ class ASAE_CAE_Sync {
 		if ( null !== $cae_field && isset( $cae_field['value'] ) && is_array( $cae_field['value'] ) ) {
 			$cae_value = $cae_field['value'];
 		}
-
-		// Client-side date filter — Wicket can't enforce end_date_gteq inside
-		// search_query (predicate suffixes don't work on nested data_fields
-		// paths), so we filter expired CAEs here. When end_date is missing
-		// we trust the server-side cae=true flag and accept the record.
 		$end_date = isset( $cae_value['end_date'] ) ? (string) $cae_value['end_date'] : '';
-		if ( '' !== $end_date && $end_date < $today ) {
-			return null;
+
+		// Determine skip reason (if any). Empty string = accept.
+		$skip_reason = '';
+		if ( ! empty( $attrs['deleted_at'] ) ) {
+			$skip_reason = __( 'deleted', 'asae-cae-roster' );
+		} elseif ( ! empty( $attrs['anonymized_at'] ) ) {
+			$skip_reason = __( 'anonymized', 'asae-cae-roster' );
+		} elseif ( '' !== $end_date && $end_date < $today ) {
+			$skip_reason = sprintf( /* translators: %s: end_date YYYY-MM-DD */ __( 'expired (end_date %s)', 'asae-cae-roster' ), $end_date );
 		}
 
 		$family_name      = (string) ( $attrs['family_name'] ?? '' );
@@ -1087,6 +1098,7 @@ class ASAE_CAE_Sync {
 			'cae_start_date'      => self::sanitize_date( $cae_value['start_date'] ?? null ),
 			'cae_end_date'        => self::sanitize_date( $cae_value['end_date'] ?? null ),
 			'last_synced_at'      => current_time( 'mysql' ),
+			'_skip_reason'        => $skip_reason,
 		);
 	}
 

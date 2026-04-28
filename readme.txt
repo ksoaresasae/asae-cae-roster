@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.9
+Stable tag: 0.0.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.10 =
+* Dry Run now shows every record Wicket returned (up to the 50-record limit), not just the ones that pass validation. Each row has a Status column: green "Active" for records that would be inserted by a real sync, red "Hidden — <reason>" for ones that are filtered out. Reasons currently surface: deleted, anonymized, and "expired (end_date YYYY-MM-DD)". Skipped rows are also styled with strikethrough on the # and Name columns so they're visually obvious.
+* Diagnostic top-line breaks the count into "active" + "hidden" instead of the older "passed structural validation" wording: e.g. "Wicket returned 50 record(s) · 45 active · 5 hidden · 2 API call(s)".
+* Refactor: normalize_person() now always returns an array with a _skip_reason field instead of returning null on filter. Same effective behavior in the chunked sync (records with a non-empty reason are counted as skipped, not inserted) but lets dry_run keep them around for display.
 
 = 0.0.9 =
 * Fix: chunked sync stalled after the first chunk on sites in any timezone west of UTC. The recover_stale_runs() routine was parsing chunk_state.updated_at (which current_time('mysql') writes in LOCAL time) as if it were UTC, then comparing it to a cutoff that was also in UTC format. On America/New_York the result was that fresh state appeared 4 hours old — past the 30-minute staleness threshold — so every chunk after the first got incorrectly marked aborted and its successor unscheduled. Two-line fix: parse updated_at via DateTime::createFromFormat($fmt, $str, wp_timezone()) and format the SQL cutoff via wp_date() instead of gmdate().

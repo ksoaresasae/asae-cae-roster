@@ -421,6 +421,7 @@ class ASAE_CAE_Admin {
 			'rows'           => $result['rows'] ?? array(),
 			'raw_count'      => (int) ( $result['raw_count'] ?? 0 ),
 			'accepted_count' => (int) ( $result['accepted_count'] ?? 0 ),
+			'hidden_count'   => (int) ( $result['hidden_count'] ?? 0 ),
 			'requests_made'  => (int) ( $result['requests_made'] ?? 0 ),
 			'endpoint'       => $result['endpoint'] ?? '',
 			'query_body'     => $result['query_body'] ?? null,
