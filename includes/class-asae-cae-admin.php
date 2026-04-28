@@ -428,7 +428,6 @@ class ASAE_CAE_Admin {
 			'response_meta'  => $result['response_meta'] ?? null,
 			'baseline_count' => array_key_exists( 'baseline_count', $result ) ? $result['baseline_count'] : null,
 			'filter_probes'  => $result['filter_probes'] ?? null,
-			'self_probe'     => $result['self_probe'] ?? null,
 		);
 		if ( ! empty( $result['ok'] ) ) {
 			wp_send_json_success( $payload );

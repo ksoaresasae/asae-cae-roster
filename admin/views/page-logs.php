@@ -17,22 +17,23 @@ if ( ! defined( 'ABSPATH' ) ) {
 $rows           = ASAE_CAE_Logger::recent( 50 );
 $datetime_fmt   = get_option( 'date_format' ) . ' ' . get_option( 'time_format' );
 
-// Helper: format MySQL UTC datetimes via wp_date for the site's local TZ.
+// Helper: format LOCAL-time mysql datetimes (current_time('mysql')) via
+// wp_date for the site's configured timezone.
 $fmt_dt = static function ( $mysql ) use ( $datetime_fmt ) {
 	if ( empty( $mysql ) ) {
 		return '';
 	}
-	$ts = strtotime( $mysql . ' UTC' );
+	$ts = ASAE_CAE_Sync::mysql_local_to_timestamp( $mysql );
 	return $ts ? wp_date( $datetime_fmt, $ts ) : esc_html( $mysql );
 };
 
-// Helper: human duration between two MySQL UTC strings.
+// Helper: human duration between two LOCAL-time mysql strings.
 $fmt_duration = static function ( $start, $end ) {
 	if ( empty( $start ) || empty( $end ) ) {
 		return '';
 	}
-	$s = strtotime( $start . ' UTC' );
-	$e = strtotime( $end . ' UTC' );
+	$s = ASAE_CAE_Sync::mysql_local_to_timestamp( $start );
+	$e = ASAE_CAE_Sync::mysql_local_to_timestamp( $end );
 	if ( ! $s || ! $e || $e < $s ) {
 		return '';
 	}

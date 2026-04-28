@@ -511,7 +511,6 @@ class ASAE_CAE_Sync {
 		// another code-edit cycle.
 		$baseline_count = null;
 		$filter_probes  = null;
-		$self_probe     = null;
 		if ( 0 === $raw_count ) {
 			try {
 				$baseline       = $client->request( 'people', array( 'page[size]' => 3 ) );
@@ -520,7 +519,6 @@ class ASAE_CAE_Sync {
 				$baseline_count = -1; // signals "baseline call also threw"
 			}
 			$filter_probes = self::run_filter_probes();
-			$self_probe    = self::run_self_probe();
 		}
 
 		// Normalize → keep records that pass our (now-loose) structural validation.
@@ -572,7 +570,6 @@ class ASAE_CAE_Sync {
 			'response_meta'  => is_array( $first_resp ) && isset( $first_resp['meta'] ) ? $first_resp['meta'] : null,
 			'baseline_count' => $baseline_count,
 			'filter_probes'  => $filter_probes,
-			'self_probe'     => $self_probe,
 		);
 	}
 
@@ -666,61 +663,6 @@ class ASAE_CAE_Sync {
 		return $out;
 	}
 
-	/**
-	 * Fetch the configured Wicket person UUID's own /people/{uuid} record so
-	 * we can see the actual data_fields structure on a known-real account
-	 * (the API user is themselves a CAE on this tenant). Used to confirm the
-	 * exact schema_slug and field names without guesswork.
-	 *
-	 * @return array
-	 */
-	private static function run_self_probe() {
-		$person_id = ASAE_CAE_Settings::get_person_id();
-		if ( '' === $person_id ) {
-			return array( 'error' => 'No configured Wicket person UUID.' );
-		}
-
-		$client = new ASAE_CAE_Wicket_Client( null, null, null, 5, 0 );
-		try {
-			$resp = $client->request( 'people/' . rawurlencode( $person_id ) );
-		} catch ( ASAE_CAE_Wicket_Exception $e ) {
-			return array( 'error' => $e->getMessage() );
-		}
-
-		$person = isset( $resp['data'] ) ? $resp['data'] : null;
-		if ( ! is_array( $person ) ) {
-			return array( 'error' => 'Unexpected response shape (no data).' );
-		}
-
-		$attrs       = isset( $person['attributes'] ) ? (array) $person['attributes'] : array();
-		$data_fields = isset( $attrs['data_fields'] ) ? $attrs['data_fields'] : null;
-
-		$df_keys           = array();
-		$designations_full = null;
-		if ( is_array( $data_fields ) ) {
-			foreach ( $data_fields as $df ) {
-				if ( ! is_array( $df ) ) {
-					continue;
-				}
-				$key      = $df['key'] ?? ( $df['schema_slug'] ?? '?' );
-				$df_keys[] = (string) $key;
-				if ( $key === 'designations' ) {
-					$designations_full = $df;
-				}
-			}
-		}
-
-		return array(
-			'person_uuid'         => $person_id,
-			'family_name'         => (string) ( $attrs['family_name'] ?? '' ),
-			'given_name'          => (string) ( $attrs['given_name'] ?? '' ),
-			'status'              => (string) ( $attrs['status'] ?? '' ),
-			'tags'                => isset( $attrs['tags'] ) ? (array) $attrs['tags'] : array(),
-			'data_fields_present' => is_array( $data_fields ),
-			'data_fields_keys'    => $df_keys,
-			'designations'        => $designations_full,
-		);
-	}
 
 	/**
 	 * Canonical /people/query filter body. Selects:
@@ -811,19 +753,29 @@ class ASAE_CAE_Sync {
 	 */
 	private static function recover_stale_runs() {
 		global $wpdb;
-		$state = self::get_chunk_state();
+		$state     = self::get_chunk_state();
 		$cutoff_ts = time() - self::STALE_RUN_SECONDS;
 
 		// Case 1: chunk_state exists and is fresh → run is healthy, do nothing.
+		// IMPORTANT: updated_at was written with current_time('mysql') which
+		// returns LOCAL time (in WP's configured timezone). Parse it through
+		// DateTime + wp_timezone() so we get the correct unix timestamp on
+		// sites west of UTC. (Earlier code used strtotime($x . ' UTC') which
+		// was correct only when local == UTC; on America/New_York it shifted
+		// fresh state 4 hours into the past, tripping the staleness cutoff
+		// and killing every chunk after the first.)
 		if ( is_array( $state ) && ! empty( $state['updated_at'] ) ) {
-			$last = strtotime( (string) $state['updated_at'] . ' UTC' );
+			$last = self::mysql_local_to_timestamp( (string) $state['updated_at'] );
 			if ( $last && $last >= $cutoff_ts ) {
 				return;
 			}
 		}
 
 		// Case 2: stale chunk_state OR no chunk_state but running rows exist.
-		$cutoff_mysql = gmdate( 'Y-m-d H:i:s', $cutoff_ts );
+		// The cutoff has to be in the same time-zone format as `started_at`
+		// (which is local, via current_time('mysql')). wp_date() formats a
+		// unix timestamp in WP's configured timezone — exactly what we need.
+		$cutoff_mysql = wp_date( 'Y-m-d H:i:s', $cutoff_ts );
 		$wpdb->query(
 			$wpdb->prepare(
 				'UPDATE ' . ASAE_CAE_DB::log_table() .
@@ -842,6 +794,26 @@ class ASAE_CAE_Sync {
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 		// Restore the daily recurring schedule (clear nuked it along with one-shots).
 		self::schedule();
+	}
+
+	/**
+	 * Convert a `current_time('mysql')` value (LOCAL time in WP's configured
+	 * timezone) back to a unix timestamp. Returns 0 on parse failure.
+	 *
+	 * Use this in place of `strtotime($x . ' UTC')` for any value originally
+	 * produced by `current_time('mysql')` — that function returns local time,
+	 * not UTC, so the UTC-parse pattern is wrong on every site east or west
+	 * of UTC.
+	 *
+	 * @param string $mysql_local
+	 * @return int
+	 */
+	public static function mysql_local_to_timestamp( $mysql_local ) {
+		if ( '' === (string) $mysql_local ) {
+			return 0;
+		}
+		$dt = DateTime::createFromFormat( 'Y-m-d H:i:s', (string) $mysql_local, wp_timezone() );
+		return ( $dt instanceof DateTime ) ? $dt->getTimestamp() : 0;
 	}
 
 	/**

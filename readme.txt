@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.8
+Stable tag: 0.0.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.9 =
+* Fix: chunked sync stalled after the first chunk on sites in any timezone west of UTC. The recover_stale_runs() routine was parsing chunk_state.updated_at (which current_time('mysql') writes in LOCAL time) as if it were UTC, then comparing it to a cutoff that was also in UTC format. On America/New_York the result was that fresh state appeared 4 hours old — past the 30-minute staleness threshold — so every chunk after the first got incorrectly marked aborted and its successor unscheduled. Two-line fix: parse updated_at via DateTime::createFromFormat($fmt, $str, wp_timezone()) and format the SQL cutoff via wp_date() instead of gmdate().
+* Fix: same timezone bug was making the Roster tab's "Last sync" timestamp and every Logs tab row display 4–5 hours off. Both views now use the new ASAE_CAE_Sync::mysql_local_to_timestamp() helper.
+* Removed the misleading self-record probe from Dry Run diagnostics (added in v0.0.7 on the false premise that the configured Wicket person UUID would be a representative CAE — it's an API auth account, not a content sample). Baseline GET and filter probes remain.
 
 = 0.0.8 =
 * Production sync filter now uses two independent fields AND'd together: data_fields.designations.value.cae = true AND data_fields.designations.value.cae_type = "cae". Both returned the same 4,736-record count in the v0.0.7 diagnostic probes; AND-ing them costs nothing and acts as cross-validation against either field drifting in the future.

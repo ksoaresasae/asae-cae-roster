@@ -109,7 +109,7 @@ if ( $latest ) {
 								echo esc_html(
 									wp_date(
 										get_option( 'date_format' ) . ' ' . get_option( 'time_format' ),
-										strtotime( $latest->started_at . ' UTC' )
+										ASAE_CAE_Sync::mysql_local_to_timestamp( $latest->started_at )
 									)
 								);
 								?>

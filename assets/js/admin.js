@@ -351,27 +351,6 @@
 				addRow('Baseline GET /people?page[size]=3', baselineMsg);
 			}
 
-			// Self-record probe — the configured API-user's own data_fields
-			// shape, taken from /people/{configured-uuid}. Best single source
-			// of truth for what the actual schema_slug + field names look like.
-			if (meta.self_probe) {
-				var sp = meta.self_probe;
-				if (sp.error) {
-					addRow('Self-record probe (GET /people/{configured-uuid})', 'error: ' + sp.error);
-				} else {
-					addRow(
-						'Self-record probe (GET /people/{configured-uuid})',
-						'family_name=' + (sp.family_name || '') +
-						', given_name=' + (sp.given_name || '') +
-						', status=' + (sp.status || '') +
-						', data_fields keys: [' + (sp.data_fields_keys || []).join(', ') + ']'
-					);
-					if (sp.designations) {
-						addRow('Self-record designations entry', sp.designations);
-					}
-				}
-			}
-
 			// Filter probes — table form for clarity.
 			if (meta.filter_probes && meta.filter_probes.length) {
 				var probeWrap = document.createElement('div');
