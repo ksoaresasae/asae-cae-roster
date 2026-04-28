@@ -417,6 +417,9 @@
 				addRow('Response top-level keys', meta.response_keys.join(', '));
 			}
 			if (meta.response_meta)   { addRow('Response meta', meta.response_meta); }
+			if (meta.addr_attr_keys && meta.addr_attr_keys.length) {
+				addRow('Address attribute keys (first sideloaded address)', meta.addr_attr_keys.join(', '));
+			}
 			if (typeof meta.baseline_count !== 'undefined' && meta.baseline_count !== null) {
 				var baselineMsg;
 				if (meta.baseline_count === -1) {

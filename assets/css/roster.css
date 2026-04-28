@@ -12,9 +12,33 @@
 	line-height: 1.5;
 }
 
-.asae-cae-roster *:focus-visible {
+/* Focus rings: only on genuinely interactive elements. Earlier versions
+ * used `.asae-cae-roster *:focus-visible`, which was wide enough that
+ * themes adding focus styling to the region wrapper or the search form
+ * (or a browser briefly focusing them on form submit) caused the entire
+ * widget to appear outlined after navigating between letters or running
+ * a search. */
+.asae-cae-roster a:focus-visible,
+.asae-cae-roster button:focus-visible,
+.asae-cae-roster input:focus-visible,
+.asae-cae-roster select:focus-visible,
+.asae-cae-roster textarea:focus-visible {
 	outline: 3px solid #2271b1;
 	outline-offset: 2px;
+}
+
+/* Defensive: make sure neither the region wrapper nor the search form
+ * ever shows a focus ring around the entire widget — these elements
+ * aren't interactive themselves, so a focus indicator on them gives
+ * misleading feedback. */
+.asae-cae-roster:focus,
+.asae-cae-roster:focus-visible,
+.asae-cae-roster:focus-within,
+.asae-cae-search:focus,
+.asae-cae-search:focus-visible,
+.asae-cae-search:focus-within {
+	outline: none;
+	box-shadow: none;
 }
 
 /* Search form. */

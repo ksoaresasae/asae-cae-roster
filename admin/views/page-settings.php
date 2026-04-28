@@ -95,11 +95,47 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 
 		<h3><?php echo esc_html__( 'Scheduled sync', 'asae-cae-roster' ); ?></h3>
 		<p class="description">
-			<?php echo esc_html__( 'A daily sync runs at the time below in the site\'s local timezone. Defaults to 02:00.', 'asae-cae-roster' ); ?>
+			<?php echo esc_html__( "Pick the days of the week the sync should run, then the time of day in the site's local timezone. Defaults to every day at 02:00.", 'asae-cae-roster' ); ?>
 		</p>
 
 		<table class="form-table" role="presentation">
 			<tbody>
+				<tr>
+					<th scope="row"><?php echo esc_html__( 'Run on these days', 'asae-cae-roster' ); ?></th>
+					<td>
+						<fieldset class="asae-cae-day-checkboxes" aria-describedby="asae-cae-days-help">
+							<legend class="screen-reader-text">
+								<?php echo esc_html__( 'Days of the week the scheduled sync should run', 'asae-cae-roster' ); ?>
+							</legend>
+							<?php
+							$day_labels = array(
+								1 => __( 'Mon', 'asae-cae-roster' ),
+								2 => __( 'Tue', 'asae-cae-roster' ),
+								3 => __( 'Wed', 'asae-cae-roster' ),
+								4 => __( 'Thu', 'asae-cae-roster' ),
+								5 => __( 'Fri', 'asae-cae-roster' ),
+								6 => __( 'Sat', 'asae-cae-roster' ),
+								0 => __( 'Sun', 'asae-cae-roster' ),
+							);
+							$checked_days = isset( $s['schedule_days'] ) && is_array( $s['schedule_days'] ) ? $s['schedule_days'] : array();
+							foreach ( $day_labels as $num => $label ) :
+								$id = 'asae-cae-schedule-day-' . (int) $num;
+								?>
+								<label for="<?php echo esc_attr( $id ); ?>" class="asae-cae-day-checkbox">
+									<input type="checkbox" id="<?php echo esc_attr( $id ); ?>"
+										name="settings[schedule_days][]"
+										value="<?php echo esc_attr( (string) $num ); ?>"
+										<?php checked( in_array( (int) $num, array_map( 'intval', $checked_days ), true ) ); ?> />
+									<?php echo esc_html( $label ); ?>
+								</label>
+							<?php endforeach; ?>
+							<input type="hidden" name="settings[_schedule_form]" value="1" />
+						</fieldset>
+						<p id="asae-cae-days-help" class="description">
+							<?php echo esc_html__( 'If no days are selected, the scheduled sync is effectively turned off (manual Sync Now still works).', 'asae-cae-roster' ); ?>
+						</p>
+					</td>
+				</tr>
 				<tr>
 					<th scope="row"><?php echo esc_html__( 'Time of day', 'asae-cae-roster' ); ?></th>
 					<td>
@@ -143,7 +179,7 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 							class="small-text"
 							aria-describedby="asae-cae-items-per-page-help" />
 						<p id="asae-cae-items-per-page-help" class="description">
-							<?php echo esc_html__( 'Number of CAEs shown per page within each letter section. Default: 20.', 'asae-cae-roster' ); ?>
+							<?php echo esc_html__( 'Number of CAEs shown per page in both the "All" view and individual letter sections. Default: 50.', 'asae-cae-roster' ); ?>
 						</p>
 					</td>
 				</tr>

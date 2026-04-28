@@ -3,7 +3,7 @@
  * Plugin Name:       ASAE CAE Roster
  * Plugin URI:        https://github.com/ksoaresasae/asae-cae-roster
  * Description:       Pull the full list of CAEs (Certified Association Executives) from a Wicket datasource and render them as a paginated, searchable, last-name-organized public roster via the [asae_cae_roster] shortcode.
- * Version:           0.0.12
+ * Version:           0.0.13
  * Author:            Keith M. Soares
  * Author URI:        https://keithmsoares.com
  * License:           GPL-2.0+
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // ── Plugin Constants ──────────────────────────────────────────────────────────
 
-define( 'ASAE_CAE_VERSION', '0.0.12' );
+define( 'ASAE_CAE_VERSION', '0.0.13' );
 define( 'ASAE_CAE_PATH', plugin_dir_path( __FILE__ ) );
 define( 'ASAE_CAE_URL', plugin_dir_url( __FILE__ ) );
 define( 'ASAE_CAE_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
@@ -68,6 +68,32 @@ function asae_cae_init() {
 	// idempotent and safe to call on every load.
 	if ( get_option( 'asae_cae_db_version' ) !== ASAE_CAE_VERSION ) {
 		ASAE_CAE_DB::create_tables();
+	}
+
+	// One-time settings migrations. Each migration writes a flag option so
+	// it doesn't run again. Migrations only ever bump values that are still
+	// at the previous default — manual customizations are left alone.
+	if ( '1' !== get_option( 'asae_cae_v0013_migrated', '' ) ) {
+		$current = get_option( ASAE_CAE_Settings::OPTION_KEY );
+		if ( is_array( $current ) ) {
+			$changed = false;
+			// Bump items_per_page 20 → 50 if user is still at the prior default.
+			if ( isset( $current['items_per_page'] ) && 20 === (int) $current['items_per_page'] ) {
+				$current['items_per_page'] = 50;
+				$changed                   = true;
+			}
+			// Seed schedule_days with all 7 days for installs that pre-date
+			// the day-of-week setting (so existing users keep their daily
+			// behaviour after upgrade — no surprise sync-off).
+			if ( ! isset( $current['schedule_days'] ) || ! is_array( $current['schedule_days'] ) ) {
+				$current['schedule_days'] = array( 0, 1, 2, 3, 4, 5, 6 );
+				$changed                  = true;
+			}
+			if ( $changed ) {
+				update_option( ASAE_CAE_Settings::OPTION_KEY, $current, false );
+			}
+		}
+		update_option( 'asae_cae_v0013_migrated', '1', false );
 	}
 
 	// Cron callback must be wired regardless of context (cron also fires from

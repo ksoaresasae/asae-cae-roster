@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.12
+Stable tag: 0.0.13
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,17 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.13 =
+* New: "All" navigation item before "A" in the letter nav, and "All" is now the default landing view. Previously the shortcode defaulted to letter A, giving undue weight to people whose surnames started with that letter. The All view paginates across the entire roster using the same items-per-page count as letter views.
+* Bumped default items per page 20 → 50, applies to both All and individual letter sections. One-time migration bumps existing installs that were still at the prior default; any value the user manually customised away from 20 is left alone.
+* New: day-of-week checkboxes in the Scheduled sync settings. Pick any combination of Mon/Tue/Wed/.../Sun. If no days are selected, the scheduled sync is effectively turned off (manual Sync Now still works). One-time migration seeds existing installs with all 7 days so the upgrade preserves the prior daily behaviour.
+* Architectural change to support day-of-week scheduling: switched from wp_schedule_event('daily', ...) to wp_schedule_single_event with a self-rearming pattern. After every scheduled run finalises, the next valid day+time is computed and queued. The next_run_timestamp() walker covers Sun-Sat and only returns a future slot. Day-of-week scheduling cannot be expressed in WP-Cron's built-in cadences; this is the right abstraction.
+* Fix: an immediate fresh sync was kicking off seconds after the first one finished. Cause: the chunked sync was scheduling its successor chunk on the same hook (asae_cae_run_sync) used by the daily scheduled run. When the JS-driven Sync Now loop drove chunks faster than WP-Cron actually fired those events, queued events piled up. Once the run finalised and chunk_state was cleared, the queued events fired one by one — each finding no chunk_state, falling through run()'s "fresh start" branch, and starting a brand-new sync from page 1. Fix: split into two cron hooks (asae_cae_run_sync for scheduled runs, asae_cae_advance_chunk for chunk-advance), and every finalize_*() now calls clear_pending_and_reschedule() to drain orphaned chunk events before re-arming the next scheduled run.
+* Fix: the public roster widget appeared with a visible focus outline around the entire shortcode after every letter click or search submit. Cause: a permissive ".asae-cae-roster *:focus-visible" selector that themes adding focus styling to the region wrapper or the search form (or a browser briefly focusing them on form submit) could trigger. Narrowed the selector to genuinely interactive descendants (a, button, input, select, textarea) and added a defensive outline:none on the wrapper and search form.
+* Fix: card name rendered as "Firstname Lastname , CAE" with an extra space before the comma. Cause: HTML whitespace between adjacent inline elements (</strong> and <span>) collapses to a single space at render time. Output is now built as a single string with no inter-element whitespace.
+* Wicket city/state extraction: expanded the field-name fallback list from {state, region} to also cover {state_name, province, province_name, state_province, country_subdivision, subdivision, administrative_area, state_code, province_code} — the Wicket platform is Canadian-based and may use international address conventions on this tenant. Added a diagnostic to dry-run output that surfaces the actual address attribute keys returned by the API, so if state still isn't extracting after the fallback expansion, the right field name is one click away.
+* Accessibility: added explicit aria-label="Clear search and show entire roster" to the Clear link in the search form (it previously read as just "Clear" with no context). Letter nav aria-label updated from "Filter by last name initial" to "Filter by last name" since "All" is now part of the nav.
 
 = 0.0.12 =
 * Fix: chunked sync was getting "Run abandoned: chunk state stalled past the recovery threshold" overnight on local dev environments where WP-Cron's loopback to wp-cron.php is unreliable (Herd's NGINX/PHP-FPM, etc.). Lengthened ASAE_CAE_Sync::STALE_RUN_SECONDS from 30 minutes to 12 hours. The 30-minute threshold was treating "no traffic for 30 minutes" as a wedged run and aborting it; on hosts where cron events only fire when a page request happens, that threshold was incompatible with closed-laptop / inactive-tab gaps. 12 hours still cleans up genuine PHP-crash wreckage by morning, but lets a quiet-but-legit run resume the next time someone opens the dashboard. (Production hosts with steady frontend traffic were unaffected — this only bit local dev.)

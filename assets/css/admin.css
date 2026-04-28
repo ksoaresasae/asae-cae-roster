@@ -232,6 +232,29 @@
 	);
 }
 
+/* Day-of-week checkbox row for the scheduled-sync settings. Lays out
+ * the seven labels in a horizontal flex row that wraps on narrow widths,
+ * with each checkbox adjacent to its day label and a generous tap area. */
+.asae-cae-day-checkboxes {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4em 1.1em;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+.asae-cae-day-checkbox {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35em;
+	min-height: 24px;
+	font-weight: 500;
+	cursor: pointer;
+}
+.asae-cae-day-checkbox input[type="checkbox"] {
+	margin: 0;
+}
+
 /* Visually-hidden helper (matches WP screen-reader-text but namespaced). */
 .asae-cae-wrap .screen-reader-text:focus {
 	background-color: #fff;

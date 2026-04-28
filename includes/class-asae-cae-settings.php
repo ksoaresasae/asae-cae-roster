@@ -43,12 +43,16 @@ class ASAE_CAE_Settings {
 			'pages_per_chunk'             => 1,     // How many Wicket pages each chunk fetches. 1 = 25 records.
 			'chunk_delay_seconds'         => 5,     // Wait between chunks before the next single-event fires.
 
-			// Scheduled sync (defaults to 2:00 local time per _start.md).
+			// Scheduled sync (defaults to 2:00 local time per _start.md). The
+			// `schedule_days` array uses the PHP date('w') convention:
+			// 0=Sun, 1=Mon, ..., 6=Sat. Empty array = scheduled sync is off
+			// entirely (manual Sync Now still works).
 			'schedule_hour'               => 2,
 			'schedule_minute'             => 0,
+			'schedule_days'               => array( 0, 1, 2, 3, 4, 5, 6 ),
 
 			// Public roster display.
-			'items_per_page'              => 20,
+			'items_per_page'              => 50,
 			'default_photo_attachment_id' => 0,
 		);
 	}
@@ -120,9 +124,27 @@ class ASAE_CAE_Settings {
 		if ( array_key_exists( 'schedule_minute', $input ) ) {
 			$sanitized['schedule_minute'] = self::clamp_int( $input['schedule_minute'], 0, 59, 0 );
 		}
+		// schedule_days is keyed off the hidden _schedule_form marker because
+		// HTML forms omit unchecked checkboxes entirely — without the marker
+		// we couldn't distinguish "user unchecked everything" from "this
+		// settings save didn't include the schedule section."
+		if ( ! empty( $input['_schedule_form'] ) ) {
+			$raw   = ( isset( $input['schedule_days'] ) && is_array( $input['schedule_days'] ) )
+				? $input['schedule_days']
+				: array();
+			$clean = array();
+			foreach ( $raw as $d ) {
+				$d = (int) $d;
+				if ( $d >= 0 && $d <= 6 && ! in_array( $d, $clean, true ) ) {
+					$clean[] = $d;
+				}
+			}
+			sort( $clean );
+			$sanitized['schedule_days'] = $clean;
+		}
 
 		if ( array_key_exists( 'items_per_page', $input ) ) {
-			$sanitized['items_per_page'] = self::clamp_int( $input['items_per_page'], 5, 100, 20 );
+			$sanitized['items_per_page'] = self::clamp_int( $input['items_per_page'], 5, 100, 50 );
 		}
 		if ( array_key_exists( 'default_photo_attachment_id', $input ) ) {
 			$sanitized['default_photo_attachment_id'] = max( 0, (int) $input['default_photo_attachment_id'] );
@@ -143,6 +165,28 @@ class ASAE_CAE_Settings {
 	public static function get_chunk_delay_seconds() { return (int) self::get( 'chunk_delay_seconds' ); }
 	public static function get_schedule_hour()     { return (int) self::get( 'schedule_hour' ); }
 	public static function get_schedule_minute()  { return (int) self::get( 'schedule_minute' ); }
+
+	/**
+	 * Days of the week (0=Sun .. 6=Sat) on which the scheduled sync should
+	 * fire. Empty array = scheduled sync is effectively off.
+	 *
+	 * @return int[]
+	 */
+	public static function get_schedule_days() {
+		$raw = self::get( 'schedule_days' );
+		if ( ! is_array( $raw ) ) {
+			return array();
+		}
+		$out = array();
+		foreach ( $raw as $d ) {
+			$d = (int) $d;
+			if ( $d >= 0 && $d <= 6 && ! in_array( $d, $out, true ) ) {
+				$out[] = $d;
+			}
+		}
+		sort( $out );
+		return $out;
+	}
 	public static function get_items_per_page()   { return (int) self::get( 'items_per_page' ); }
 	public static function get_default_photo_id() { return (int) self::get( 'default_photo_attachment_id' ); }
 

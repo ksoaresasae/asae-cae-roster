@@ -22,8 +22,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class ASAE_CAE_Sync {
 
-	/** WP-Cron hook fired by the daily schedule. */
+	/** WP-Cron hook fired by the day-of-week scheduled run. */
 	const CRON_HOOK = 'asae_cae_run_sync';
+
+	/** WP-Cron hook fired between chunks of an in-progress sync. Separated
+	 * from CRON_HOOK so wp_next_scheduled(CRON_HOOK) reflects only the next
+	 * scheduled run, not a chunk-advance event — and so finalize_*() can
+	 * drain orphaned chunk events without disturbing the scheduled run. */
+	const CRON_CHUNK_HOOK = 'asae_cae_advance_chunk';
 
 	/**
 	 * wp_options key holding the cooperative stop signal. When set to '1' a
@@ -84,6 +90,7 @@ class ASAE_CAE_Sync {
 	 */
 	public static function register_cron_action() {
 		add_action( self::CRON_HOOK, array( __CLASS__, 'run_from_cron' ) );
+		add_action( self::CRON_CHUNK_HOOK, array( __CLASS__, 'run_from_cron' ) );
 	}
 
 	/**
@@ -96,11 +103,16 @@ class ASAE_CAE_Sync {
 	}
 
 	/**
-	 * Schedule the daily sync at the configured local time.
+	 * Schedule the next sync at the configured day(s)-of-week + time. Uses
+	 * single-event scheduling (re-armed after each run) instead of
+	 * wp_schedule_event('daily',…) because WP-Cron doesn't support
+	 * arbitrary day-of-week cadences natively. After each scheduled run
+	 * finalizes, finalize_*() calls clear_pending_and_reschedule() to put
+	 * the next single-event in place.
 	 *
-	 * Idempotent: if an event is already scheduled, we leave it alone unless
-	 * the configured time has changed (in which case the caller should call
-	 * unschedule() first via reschedule()).
+	 * Idempotent: if an event is already scheduled, leaves it alone. Returns
+	 * false (no event scheduled) when the user has unchecked every day —
+	 * that's how we model "scheduled sync turned off."
 	 *
 	 * @return bool True if a new event was scheduled or one already existed.
 	 */
@@ -110,17 +122,23 @@ class ASAE_CAE_Sync {
 		}
 
 		$timestamp = self::next_run_timestamp();
-		$result    = wp_schedule_event( $timestamp, 'daily', self::CRON_HOOK );
+		if ( 0 === $timestamp ) {
+			return false; // No days enabled — scheduled sync is off.
+		}
+		$result = wp_schedule_single_event( $timestamp, self::CRON_HOOK );
 		return false !== $result;
 	}
 
 	/**
-	 * Clear all scheduled occurrences of our cron event.
+	 * Clear every scheduled event this plugin owns — both the day-of-week
+	 * scheduled run and any pending chunk-advance events. Called from the
+	 * deactivation hook and from internal cleanup paths.
 	 *
 	 * @return void
 	 */
 	public static function unschedule() {
 		wp_clear_scheduled_hook( self::CRON_HOOK );
+		wp_clear_scheduled_hook( self::CRON_CHUNK_HOOK );
 	}
 
 	/**
@@ -135,26 +153,59 @@ class ASAE_CAE_Sync {
 	}
 
 	/**
-	 * Compute the next Unix timestamp at which the configured local-time
-	 * schedule (HH:MM in wp_timezone()) will next occur. If today's slot has
-	 * already passed, returns tomorrow's.
+	 * Compute the next Unix timestamp at which a scheduled run should fire,
+	 * given the configured days-of-week and time-of-day. Walks forward up
+	 * to 7 days from now until it finds a candidate that is (a) on an
+	 * enabled day, and (b) still in the future. Returns 0 when no days are
+	 * enabled — that's the signal to schedule() that the scheduled sync
+	 * has been turned off.
 	 *
-	 * @return int
+	 * @return int Unix timestamp, or 0 if no days are enabled.
 	 */
 	public static function next_run_timestamp() {
+		$days = ASAE_CAE_Settings::get_schedule_days();
+		if ( empty( $days ) ) {
+			return 0;
+		}
+
 		$tz     = wp_timezone();
 		$hour   = ASAE_CAE_Settings::get_schedule_hour();
 		$minute = ASAE_CAE_Settings::get_schedule_minute();
-
 		$now    = new DateTime( 'now', $tz );
-		$target = new DateTime(
-			sprintf( 'today %02d:%02d:00', $hour, $minute ),
-			$tz
-		);
-		if ( $target <= $now ) {
-			$target->modify( '+1 day' );
+
+		for ( $i = 0; $i < 7; $i++ ) {
+			$candidate = new DateTime( 'now', $tz );
+			$candidate->modify( '+' . $i . ' days' );
+			$candidate->setTime( $hour, $minute, 0 );
+
+			$dow = (int) $candidate->format( 'w' ); // 0=Sun, 6=Sat
+			if ( ! in_array( $dow, $days, true ) ) {
+				continue;
+			}
+			if ( $candidate <= $now ) {
+				continue; // slot already passed today
+			}
+			return $candidate->getTimestamp();
 		}
-		return $target->getTimestamp();
+		// All 7 days walked without a hit — only happens if $days was empty,
+		// which we already returned 0 for above. Defensive fallback.
+		return 0;
+	}
+
+	/**
+	 * Drain any pending chunk-advance events and re-arm the next scheduled
+	 * run. Called from every finalize_*() so that orphaned chunk events
+	 * (queued during a JS-driven loop that finished faster than cron fired)
+	 * can't accidentally start a fresh sync from page 1 once the run is
+	 * over. Also covers the deferred-edge case where the day-of-week
+	 * scheduled event needs to be re-armed for the next valid day.
+	 *
+	 * @return void
+	 */
+	private static function clear_pending_and_reschedule() {
+		wp_clear_scheduled_hook( self::CRON_CHUNK_HOOK );
+		wp_clear_scheduled_hook( self::CRON_HOOK );
+		self::schedule();
 	}
 
 	/**
@@ -379,7 +430,7 @@ class ASAE_CAE_Sync {
 		);
 
 		$delay = max( 1, ASAE_CAE_Settings::get_chunk_delay_seconds() );
-		wp_schedule_single_event( time() + $delay, self::CRON_HOOK );
+		wp_schedule_single_event( time() + $delay, self::CRON_CHUNK_HOOK );
 
 		return array(
 			'ok'      => true,
@@ -425,6 +476,7 @@ class ASAE_CAE_Sync {
 		ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_SUCCESS );
 		self::clear_chunk_state();
 		self::clear_progress();
+		self::clear_pending_and_reschedule();
 
 		return array(
 			'ok'      => true,
@@ -449,6 +501,7 @@ class ASAE_CAE_Sync {
 		ASAE_CAE_DB::truncate_staging();
 		self::clear_chunk_state();
 		self::clear_progress();
+		self::clear_pending_and_reschedule();
 
 		return array(
 			'ok'      => false,
@@ -474,6 +527,7 @@ class ASAE_CAE_Sync {
 		delete_option( self::STOP_FLAG );
 		self::clear_chunk_state();
 		self::clear_progress();
+		self::clear_pending_and_reschedule();
 
 		return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
 	}
@@ -605,6 +659,21 @@ class ASAE_CAE_Sync {
 			}
 		}
 
+		// Diagnostic: capture the attribute keys from the first address
+		// resource in the response. Lets the dry-run UI show what field
+		// names Wicket actually uses for state/province on this tenant —
+		// useful when locations only show city and we need to know whether
+		// to add another fallback to pick_city_state().
+		$addr_attr_keys = array();
+		foreach ( $included_acc as $row ) {
+			if ( isset( $row['type'] ) && 'addresses' === $row['type']
+				&& isset( $row['attributes'] ) && is_array( $row['attributes'] )
+			) {
+				$addr_attr_keys = array_keys( $row['attributes'] );
+				break;
+			}
+		}
+
 		return array(
 			'ok'             => true,
 			'message'        => sprintf(
@@ -626,6 +695,7 @@ class ASAE_CAE_Sync {
 			'response_meta'  => is_array( $first_resp ) && isset( $first_resp['meta'] ) ? $first_resp['meta'] : null,
 			'baseline_count' => $baseline_count,
 			'filter_probes'  => $filter_probes,
+			'addr_attr_keys' => $addr_attr_keys,
 		);
 	}
 
@@ -847,9 +917,7 @@ class ASAE_CAE_Sync {
 		// Always clear the (possibly stale) state and any leftover scheduled chunks.
 		self::clear_chunk_state();
 		self::clear_progress();
-		wp_clear_scheduled_hook( self::CRON_HOOK );
-		// Restore the daily recurring schedule (clear nuked it along with one-shots).
-		self::schedule();
+		self::clear_pending_and_reschedule();
 	}
 
 	/**
@@ -918,13 +986,12 @@ class ASAE_CAE_Sync {
 		}
 
 		// Step 3: discard any half-populated staging data, drop the in-progress
-		// chunk state, and unschedule any pending single-event chunks so the
-		// run doesn't resurrect itself on the next page load.
+		// chunk state, and unschedule any pending chunk-advance / scheduled
+		// events so the run doesn't resurrect itself on the next page load.
 		ASAE_CAE_DB::truncate_staging();
 		self::clear_chunk_state();
 		self::clear_progress();
-		wp_clear_scheduled_hook( self::CRON_HOOK );
-		self::schedule(); // restore the daily recurring schedule.
+		self::clear_pending_and_reschedule();
 
 		if ( $running_now > 0 ) {
 			$msg = sprintf(
@@ -1229,7 +1296,17 @@ class ASAE_CAE_Sync {
 			}
 			$addr_attrs = $addrs_index[ $id ]['attributes'] ?? array();
 			$city       = (string) ( $addr_attrs['city'] ?? '' );
-			$state      = (string) ( $addr_attrs['state'] ?? $addr_attrs['region'] ?? '' );
+			// Wicket is Canadian-based and may use any of several names for
+			// the state/province field. Walk a candidate list until we find
+			// the first non-empty value. Order matters: prefer human-
+			// readable names over codes when both are present.
+			$state = '';
+			foreach ( array( 'state', 'state_name', 'province', 'province_name', 'state_province', 'region', 'country_subdivision', 'subdivision', 'administrative_area', 'state_code', 'province_code' ) as $field_name ) {
+				if ( isset( $addr_attrs[ $field_name ] ) && '' !== (string) $addr_attrs[ $field_name ] ) {
+					$state = (string) $addr_attrs[ $field_name ];
+					break;
+				}
+			}
 			if ( '' === $city && '' === $state ) {
 				continue;
 			}

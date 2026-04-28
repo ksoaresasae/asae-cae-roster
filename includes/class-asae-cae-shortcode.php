@@ -75,13 +75,17 @@ class ASAE_CAE_Shortcode {
 		// Read state from URL query string (sanitized).
 		$state = self::read_state();
 
-		// In search mode the letter filter is ignored; otherwise default to
-		// the first letter that actually has any records.
+		// Active letters drive the letter nav (disabled-styling for empties).
+		// In search mode the letter filter is ignored; otherwise an empty
+		// letter is the "All" view (entire roster, paginated). Invalid
+		// letters fall back to "All" rather than silently snapping to "A",
+		// which had given undue weight to people whose surnames started
+		// with that letter.
 		$active_letters = self::get_active_letters();
 		if ( '' !== $state['search'] ) {
 			$state['letter'] = '';
-		} elseif ( '' === $state['letter'] || ! in_array( $state['letter'], $active_letters, true ) ) {
-			$state['letter'] = ! empty( $active_letters ) ? $active_letters[0] : '';
+		} elseif ( '' !== $state['letter'] && ! in_array( $state['letter'], $active_letters, true ) ) {
+			$state['letter'] = '';
 		}
 
 		$per_page = max( 5, min( 100, ASAE_CAE_Settings::get_items_per_page() ) );
@@ -118,7 +122,8 @@ class ASAE_CAE_Shortcode {
 				</button>
 				<?php if ( '' !== $state['search'] ) : ?>
 					<a class="asae-cae-search-clear"
-						href="<?php echo esc_url( self::build_url( array( self::QP_SEARCH => null, self::QP_PAGE => null ) ) ); ?>">
+						href="<?php echo esc_url( self::build_url( array( self::QP_SEARCH => null, self::QP_PAGE => null ) ) ); ?>"
+						aria-label="<?php echo esc_attr__( 'Clear search and show entire roster', 'asae-cae-roster' ); ?>">
 						<?php echo esc_html__( 'Clear', 'asae-cae-roster' ); ?>
 					</a>
 				<?php endif; ?>
@@ -354,21 +359,40 @@ class ASAE_CAE_Shortcode {
 	// ── Sub-renderers ────────────────────────────────────────────────────────
 
 	/**
-	 * Render the A-Z letter navigation. Letters with no records are output as
-	 * spans with aria-disabled, not links, so they're announced as unavailable
-	 * but still maintain the visual layout.
+	 * Render the A-Z letter navigation, prefixed with an "All" item that
+	 * shows the entire roster (paginated). "All" is the default when no
+	 * letter is in the URL — see render() — so on first visit no single
+	 * letter group gets undue weight from being the landing view. Letters
+	 * with no records are rendered as spans with aria-disabled, not links,
+	 * so they're announced as unavailable but still maintain layout.
 	 *
 	 * @param string[] $active_letters
-	 * @param string   $current
+	 * @param string   $current Empty string = "All" is current.
 	 * @return void
 	 */
 	private static function render_letter_nav( array $active_letters, string $current ): void {
 		$letters = range( 'A', 'Z' );
 		$active  = array_flip( $active_letters );
+		$is_all  = ( '' === $current );
 
-		echo '<nav class="asae-cae-letters" aria-label="' . esc_attr__( 'Filter by last name initial', 'asae-cae-roster' ) . '"><ul>';
+		echo '<nav class="asae-cae-letters" aria-label="' . esc_attr__( 'Filter by last name', 'asae-cae-roster' ) . '"><ul>';
+
+		// "All" — clearing the letter filter drops cae_letter from the URL.
+		if ( $is_all ) {
+			printf(
+				'<li class="is-current"><span aria-current="page">%s</span></li>',
+				esc_html__( 'All', 'asae-cae-roster' )
+			);
+		} else {
+			printf(
+				'<li><a href="%1$s">%2$s</a></li>',
+				esc_url( self::build_url( array( self::QP_LETTER => null, self::QP_PAGE => null ) ) ),
+				esc_html__( 'All', 'asae-cae-roster' )
+			);
+		}
+
 		foreach ( $letters as $letter ) {
-			$has = isset( $active[ $letter ] );
+			$has        = isset( $active[ $letter ] );
 			$is_current = ( $letter === $current );
 			if ( $is_current ) {
 				printf(
@@ -441,10 +465,17 @@ class ASAE_CAE_Shortcode {
 			</div>
 			<div class="asae-cae-card-body">
 				<p class="asae-cae-card-name">
-					<strong><?php echo esc_html( $display_name ); ?></strong>
-					<?php if ( '' !== $display_suffix ) : ?>
-						<span class="asae-cae-card-suffix">, <?php echo esc_html( $display_suffix ); ?></span>
-					<?php endif; ?>
+					<?php
+					// Output strong + suffix without whitespace between them — HTML
+					// whitespace between adjacent inline elements collapses to a
+					// single space, which had been rendering "John Smith , CAE"
+					// (extra space before the comma) instead of "John Smith, CAE".
+					$name_html = '<strong>' . esc_html( $display_name ) . '</strong>';
+					if ( '' !== $display_suffix ) {
+						$name_html .= '<span class="asae-cae-card-suffix">, ' . esc_html( $display_suffix ) . '</span>';
+					}
+					echo $name_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- both pieces escaped above.
+					?>
 				</p>
 				<?php if ( '' !== $rec->job_title ) : ?>
 					<p class="asae-cae-card-title"><?php echo esc_html( $rec->job_title ); ?></p>
