@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.10
+Stable tag: 0.0.11
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.11 =
+* Sync Now now drives the entire chunked sync from the browser tab via repeated AJAX calls instead of relying on WP-Cron to fire each successive chunk. WP-Cron's loopback POST to wp-cron.php is unreliable on a lot of local dev environments (including Herd's NGINX/PHP-FPM out of the box), which had been leaving syncs stuck after the first chunk on those hosts. The JS-driven loop calls ajax_run_sync, waits the configured chunk_delay_seconds, and calls again — until the server reports in_progress=false. Wicket sees the same gentle one-page-every-5-seconds traffic pattern as before. The daily 02:00 sync still uses WP-Cron (which works fine in production WP environments).
+* Added a short-lived transient chunk lock in Sync::run() so a JS-driven call and a cron-driven event can't accidentally race on the same Wicket page if both fire at once. TTL is 90 seconds — generous enough for slow API responses, short enough that a crashed PHP process can't keep the lock forever.
+* Sync result payloads now include an `in_progress` flag based on whether chunk_state still exists after the call. Used by the JS loop to know when to stop calling.
 
 = 0.0.10 =
 * Dry Run now shows every record Wicket returned (up to the 50-record limit), not just the ones that pass validation. Each row has a Status column: green "Active" for records that would be inserted by a real sync, red "Hidden — <reason>" for ones that are filtered out. Reasons currently surface: deleted, anonymized, and "expired (end_date YYYY-MM-DD)". Skipped rows are also styled with strikethrough on the # and Name columns so they're visually obvious.

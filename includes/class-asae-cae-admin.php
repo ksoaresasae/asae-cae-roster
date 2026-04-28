@@ -118,7 +118,8 @@ class ASAE_CAE_Admin {
 			array(
 				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( self::AJAX_NONCE ),
-				'pollIntervalMs' => 3000,
+				'pollIntervalMs'      => 3000,
+				'chunkDelaySeconds'   => max( 1, ASAE_CAE_Settings::get_chunk_delay_seconds() ),
 				'strings' => array(
 					'saving'           => __( 'Saving…', 'asae-cae-roster' ),
 					'saved'            => __( 'Settings saved.', 'asae-cae-roster' ),
@@ -366,17 +367,19 @@ class ASAE_CAE_Admin {
 		if ( ! empty( $result['ok'] ) ) {
 			wp_send_json_success(
 				array(
-					'message'  => $result['message'],
-					'log_id'   => (int) $result['log_id'],
-					'count'    => ASAE_CAE_DB::count_live(),
-					'next_run' => self::format_next_run(),
+					'message'     => $result['message'],
+					'log_id'      => (int) $result['log_id'],
+					'count'       => ASAE_CAE_DB::count_live(),
+					'next_run'    => self::format_next_run(),
+					'in_progress' => ! empty( $result['in_progress'] ),
 				)
 			);
 		} else {
 			wp_send_json_error(
 				array(
-					'message' => $result['message'],
-					'log_id'  => (int) $result['log_id'],
+					'message'     => $result['message'],
+					'log_id'      => (int) $result['log_id'],
+					'in_progress' => ! empty( $result['in_progress'] ),
 				)
 			);
 		}

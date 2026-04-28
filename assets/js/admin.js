@@ -220,6 +220,13 @@
 	}
 
 	// ── Sync Now ─────────────────────────────────────────────────────────────
+	//
+	// JS drives the entire chunk loop client-side. The PHP layer also schedules
+	// a wp_schedule_single_event after each chunk (so a non-JS context like
+	// WP-Cron can resume the run later), but on local dev / hosts where
+	// WP-Cron's loopback POST is unreliable, the JS-side loop is what actually
+	// keeps the sync moving. The PHP-side chunk lock prevents races between
+	// the two paths if both happen to fire.
 
 	var syncBtn = $('asae-cae-sync-now');
 	if (syncBtn) {
@@ -228,34 +235,60 @@
 			syncBtn.disabled = true;
 			setStatus(stat, S.syncing, 'busy');
 
-			// Surface the panel and start polling immediately — the run_sync
-			// AJAX is synchronous and won't return for minutes, so polling
-			// fetches running in parallel are what drive the live updates.
 			showProgressPanel();
 			paintProgress({ current: 0, total: 0, phase: S.progressRunning, detail: '' });
 			startProgressPolling();
 
-			postAjax('asae_cae_run_sync')
-				.then(function (data) {
-					if (data && data.success) {
-						setStatus(stat, (data.data && data.data.message) || '', 'ok');
-						var countEl = $('asae-cae-record-count');
-						if (countEl && data.data && typeof data.data.count !== 'undefined') {
-							countEl.textContent = String(data.data.count);
-						}
-					} else {
-						setStatus(stat, (data && data.data && data.data.message) || S.syncError, 'err');
-					}
-				})
-				.catch(function () { setStatus(stat, S.syncError, 'err'); })
-				.then(function () {
-					syncBtn.disabled = false;
-					// Final progress check + panel hide. The polling loop also
-					// handles this, but doing it once more synchronously keeps
-					// the UI snappy when the sync ends between poll ticks.
-					fetchProgressOnce().then(function () { stopProgressPolling(); });
-				});
+			runChunkUntilDone(stat).then(function () {
+				syncBtn.disabled = false;
+				fetchProgressOnce().then(function () { stopProgressPolling(); });
+			});
 		});
+	}
+
+	/**
+	 * Drive the chunked sync to completion via repeated AJAX calls. Each call
+	 * to asae_cae_run_sync processes ONE chunk (one or a few Wicket pages).
+	 * If the response says `in_progress: true`, schedule the next call after
+	 * chunkDelaySeconds + a small buffer; otherwise the sync has finalized.
+	 *
+	 * Errors stop the loop. The user can click Sync Now again to resume from
+	 * wherever the chunk_state currently sits.
+	 */
+	function runChunkUntilDone(statEl) {
+		var delayMs = ((asaeCaeAdmin.chunkDelaySeconds || 5) + 1) * 1000;
+
+		function step() {
+			return postAjax('asae_cae_run_sync').then(function (data) {
+				if (!data || !data.success || !data.data) {
+					setStatus(statEl, (data && data.data && data.data.message) || S.syncError, 'err');
+					return;
+				}
+				var d = data.data;
+
+				// Always reflect the latest live count, even mid-run.
+				var countEl = $('asae-cae-record-count');
+				if (countEl && typeof d.count !== 'undefined') {
+					countEl.textContent = String(d.count);
+				}
+
+				if (d.in_progress) {
+					// More chunks pending — show "running…" status and schedule next.
+					setStatus(statEl, S.syncing, 'busy');
+					return new Promise(function (resolve) {
+						setTimeout(function () { resolve(step()); }, delayMs);
+					});
+				}
+
+				// Sync finalized (success / fail / abort). Show whatever the
+				// server's final message was.
+				setStatus(statEl, d.message || '', 'ok');
+			}).catch(function () {
+				setStatus(statEl, S.syncError, 'err');
+			});
+		}
+
+		return step();
 	}
 
 	// ── Dry Run (preview first 50 alphabetically) ────────────────────────────

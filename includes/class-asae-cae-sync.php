@@ -51,6 +51,16 @@ class ASAE_CAE_Sync {
 	 */
 	const CHUNK_STATE_KEY = 'asae_cae_chunk_state';
 
+	/** Short-lived transient that blocks concurrent chunk execution. The
+	 * JS-driven Sync Now loop and a WP-Cron-driven single-event chunk can
+	 * both try to fire the next chunk; without a lock, they would race on
+	 * the same Wicket page and both write to staging. */
+	const CHUNK_LOCK_KEY = 'asae_cae_chunk_lock';
+
+	/** TTL for the chunk lock — generous enough for slow Wicket responses,
+	 * short enough that a crashed PHP process doesn't keep the lock forever. */
+	const CHUNK_LOCK_TTL = 90;
+
 	/** Wicket JSON:API page size. 25 is the platform default. */
 	const PAGE_SIZE = 25;
 
@@ -161,44 +171,69 @@ class ASAE_CAE_Sync {
 		// no further chunk events were ever scheduled). Always runs first.
 		self::recover_stale_runs();
 
-		$state = self::get_chunk_state();
-
-		if ( null === $state ) {
-			// Fresh start. Refuse if some other 'running' row exists (defensive —
-			// recover_stale_runs would have cleared anything truly dead).
-			if ( self::is_sync_in_progress() ) {
-				return array(
-					'ok'      => false,
-					'message' => __( 'Another sync is already in progress. Wait for it to finish or click Stop All Active Jobs.', 'asae-cae-roster' ),
-					'log_id'  => 0,
-				);
-			}
-
-			if ( ! ASAE_CAE_Settings::is_wicket_configured() ) {
-				$msg    = __( 'Wicket is not fully configured (base URL, secret, and person ID required).', 'asae-cae-roster' );
-				$log_id = ASAE_CAE_Logger::start( $triggered_by );
-				ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
-				return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id );
-			}
-
-			$log_id = ASAE_CAE_Logger::start( $triggered_by );
-			ASAE_CAE_DB::truncate_staging();
-			$state = array(
-				'log_id'        => (int) $log_id,
-				'next_page'     => 1,
-				'total_pages'   => 0,
-				'total_items'   => 0,
-				'processed'     => 0,
-				'skipped'       => 0,
-				'requests_made' => 0,
-				'started_at'    => current_time( 'mysql' ),
-				'updated_at'    => current_time( 'mysql' ),
+		// Take the chunk lock so a concurrent caller (JS loop racing a cron
+		// event, or two cron events firing back-to-back) doesn't double-process
+		// the same Wicket page. If the lock is already held, bail out cleanly.
+		if ( false !== get_transient( self::CHUNK_LOCK_KEY ) ) {
+			return array(
+				'ok'           => true,
+				'message'      => __( 'Another chunk is currently running; skipped.', 'asae-cae-roster' ),
+				'log_id'       => 0,
+				'in_progress'  => ( null !== self::get_chunk_state() ),
+				'lock_skipped' => true,
 			);
-			self::save_chunk_state( $state );
-			self::set_progress( 0, 0, __( 'Preparing chunked sync…', 'asae-cae-roster' ) );
 		}
+		set_transient( self::CHUNK_LOCK_KEY, time(), self::CHUNK_LOCK_TTL );
 
-		return self::run_chunk( $state );
+		try {
+			$state = self::get_chunk_state();
+
+			if ( null === $state ) {
+				// Fresh start. Refuse if some other 'running' row exists (defensive —
+				// recover_stale_runs would have cleared anything truly dead).
+				if ( self::is_sync_in_progress() ) {
+					return array(
+						'ok'          => false,
+						'message'     => __( 'Another sync is already in progress. Wait for it to finish or click Stop All Active Jobs.', 'asae-cae-roster' ),
+						'log_id'      => 0,
+						'in_progress' => true,
+					);
+				}
+
+				if ( ! ASAE_CAE_Settings::is_wicket_configured() ) {
+					$msg    = __( 'Wicket is not fully configured (base URL, secret, and person ID required).', 'asae-cae-roster' );
+					$log_id = ASAE_CAE_Logger::start( $triggered_by );
+					ASAE_CAE_Logger::finish( $log_id, ASAE_CAE_Logger::STATUS_FAILED, $msg );
+					return array( 'ok' => false, 'message' => $msg, 'log_id' => $log_id, 'in_progress' => false );
+				}
+
+				$log_id = ASAE_CAE_Logger::start( $triggered_by );
+				ASAE_CAE_DB::truncate_staging();
+				$state = array(
+					'log_id'        => (int) $log_id,
+					'next_page'     => 1,
+					'total_pages'   => 0,
+					'total_items'   => 0,
+					'processed'     => 0,
+					'skipped'       => 0,
+					'requests_made' => 0,
+					'started_at'    => current_time( 'mysql' ),
+					'updated_at'    => current_time( 'mysql' ),
+				);
+				self::save_chunk_state( $state );
+				self::set_progress( 0, 0, __( 'Preparing chunked sync…', 'asae-cae-roster' ) );
+			}
+
+			$result = self::run_chunk( $state );
+
+			// Tag every return path with in_progress so the JS-driven Sync Now
+			// loop knows when to stop. true = chunk_state still exists (more
+			// chunks pending); false = sync finalized (success / fail / abort).
+			$result['in_progress'] = ( null !== self::get_chunk_state() );
+			return $result;
+		} finally {
+			delete_transient( self::CHUNK_LOCK_KEY );
+		}
 	}
 
 	/**
