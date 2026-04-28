@@ -113,6 +113,15 @@
 	color: #50575e;
 	font-weight: 400;
 }
+.asae-cae-dry-run-diag {
+	margin: 0 0 0.6em;
+	padding: 0.5em 0.75em;
+	background: #f0f6fc;
+	border: 1px solid #c5d9ed;
+	border-radius: 4px;
+	color: #1d2327;
+	font-size: 13px;
+}
 
 .asae-cae-error-detail {
 	margin-top: 4px;

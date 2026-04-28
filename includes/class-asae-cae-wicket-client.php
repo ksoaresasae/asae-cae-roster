@@ -105,11 +105,38 @@ class ASAE_CAE_Wicket_Client {
 	}
 
 	/**
-	 * Low-level request. Returns the decoded JSON body array on success.
+	 * GET request. Returns the decoded JSON body array on success.
 	 *
 	 * @throws ASAE_CAE_Wicket_Exception
 	 */
 	public function request( $path, $query = array(), $timeout = 20 ) {
+		return $this->dispatch( 'GET', $path, $query, null, $timeout );
+	}
+
+	/**
+	 * POST request with a JSON body. Used for the /people/query endpoint
+	 * (see https://wicketapi.docs.apiary.io/) which accepts complex filters
+	 * — including filters on nested data_fields paths — that aren't expressible
+	 * via the GET filter[…] query-string syntax.
+	 *
+	 * @param string $path  Path under base_url, or an absolute URL.
+	 * @param array  $query Query-string args (e.g. include, page[size]).
+	 * @param array  $body  Decoded JSON body to send.
+	 * @param int    $timeout
+	 * @return array Decoded JSON response.
+	 * @throws ASAE_CAE_Wicket_Exception
+	 */
+	public function request_post( $path, $query = array(), $body = array(), $timeout = 30 ) {
+		return $this->dispatch( 'POST', $path, $query, $body, $timeout );
+	}
+
+	/**
+	 * Internal dispatcher: applies the request budget, courtesy delay, JWT
+	 * auth, and exponential-backoff retry loop for both GET and POST.
+	 *
+	 * @throws ASAE_CAE_Wicket_Exception
+	 */
+	private function dispatch( $method, $path, $query, $body, $timeout ) {
 		if ( ! $this->is_configured() ) {
 			throw new ASAE_CAE_Wicket_Exception( 'Wicket client is not configured (base URL, secret, and person ID are all required).' );
 		}
@@ -130,14 +157,22 @@ class ASAE_CAE_Wicket_Client {
 			$url = add_query_arg( $query, $url );
 		}
 
+		$headers = array(
+			'Authorization' => 'Bearer ' . $this->build_jwt(),
+			'Accept'        => 'application/vnd.api+json',
+			'User-Agent'    => 'ASAE-CAE-Roster/' . ASAE_CAE_VERSION,
+		);
+
 		$args = array(
 			'timeout' => (int) $timeout,
-			'headers' => array(
-				'Authorization' => 'Bearer ' . $this->build_jwt(),
-				'Accept'        => 'application/vnd.api+json',
-				'User-Agent'    => 'ASAE-CAE-Roster/' . ASAE_CAE_VERSION,
-			),
+			'headers' => $headers,
 		);
+
+		if ( 'POST' === $method ) {
+			$args['method']                  = 'POST';
+			$args['headers']['Content-Type'] = 'application/vnd.api+json';
+			$args['body']                    = wp_json_encode( $body ?: new stdClass() );
+		}
 
 		$attempts    = 0;
 		$max_retries = 3;
@@ -145,7 +180,9 @@ class ASAE_CAE_Wicket_Client {
 
 		while ( true ) {
 			$this->requests_made++;
-			$response = wp_remote_get( $url, $args );
+			$response = ( 'POST' === $method )
+				? wp_remote_post( $url, $args )
+				: wp_remote_get( $url, $args );
 
 			if ( is_wp_error( $response ) ) {
 				if ( $attempts < $max_retries ) {
@@ -157,11 +194,11 @@ class ASAE_CAE_Wicket_Client {
 				throw new ASAE_CAE_Wicket_Exception( 'HTTP error: ' . $response->get_error_message() );
 			}
 
-			$code = (int) wp_remote_retrieve_response_code( $response );
-			$body = wp_remote_retrieve_body( $response );
+			$code  = (int) wp_remote_retrieve_response_code( $response );
+			$rbody = wp_remote_retrieve_body( $response );
 
 			if ( 200 === $code ) {
-				$decoded = json_decode( $body, true );
+				$decoded = json_decode( $rbody, true );
 				if ( null === $decoded && JSON_ERROR_NONE !== json_last_error() ) {
 					throw new ASAE_CAE_Wicket_Exception( 'Invalid JSON response.', $code );
 				}
@@ -179,7 +216,7 @@ class ASAE_CAE_Wicket_Client {
 				continue;
 			}
 
-			$snippet = mb_substr( (string) $body, 0, 300 );
+			$snippet = mb_substr( (string) $rbody, 0, 300 );
 			throw new ASAE_CAE_Wicket_Exception( 'HTTP ' . $code . ' from Wicket: ' . $snippet, $code );
 		}
 	}

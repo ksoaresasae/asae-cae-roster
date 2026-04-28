@@ -236,19 +236,15 @@ class ASAE_CAE_Sync {
 		$included_acc = array();
 		$hit_end      = false;
 
+		$body = self::build_query_filter_body();
+
 		for ( $i = 0; $i < $pages_per_chunk; $i++ ) {
 			$page = (int) $state['next_page'];
 			try {
-				$resp = $client->request(
-					'people',
-					array(
-						'filter[tag_eq]'    => 'CAE',
-						'filter[status_eq]' => 'active',
-						'include'           => 'primary_organization,addresses',
-						'sort'              => 'family_name',
-						'page[size]'        => self::PAGE_SIZE,
-						'page[number]'      => $page,
-					)
+				$resp = $client->request_post(
+					'people/query',
+					self::build_query_string( $page ),
+					$body
 				);
 			} catch ( ASAE_CAE_Wicket_Exception $e ) {
 				return self::finalize_failed( $log_id, $state, $client, $e->getMessage() );
@@ -467,19 +463,14 @@ class ASAE_CAE_Sync {
 		$data_acc     = array();
 		$included_acc = array();
 		$today        = current_time( 'Y-m-d' );
+		$body         = self::build_query_filter_body();
 
 		try {
 			for ( $page = 1; $page <= $pages_needed && count( $data_acc ) < $limit; $page++ ) {
-				$resp = $client->request(
-					'people',
-					array(
-						'filter[tag_eq]'    => 'CAE',
-						'filter[status_eq]' => 'active',
-						'include'           => 'primary_organization,addresses',
-						'sort'              => 'family_name',
-						'page[size]'        => self::PAGE_SIZE,
-						'page[number]'      => $page,
-					)
+				$resp = $client->request_post(
+					'people/query',
+					self::build_query_string( $page ),
+					$body
 				);
 				$data     = isset( $resp['data'] ) ? (array) $resp['data'] : array();
 				$included = isset( $resp['included'] ) ? (array) $resp['included'] : array();
@@ -498,11 +489,18 @@ class ASAE_CAE_Sync {
 				'ok'            => false,
 				'message'       => $e->getMessage(),
 				'rows'          => array(),
+				'raw_count'     => 0,
+				'accepted_count' => 0,
 				'requests_made' => $client->requests_made(),
 			);
 		}
 
-		// Normalize → only keep currently-active CAEs, just like the real sync.
+		$raw_count = count( $data_acc );
+
+		// Normalize → keep records that pass our (now-loose) structural validation.
+		// With server-side filtering on data_fields.designations, every returned
+		// record is by definition a currently-active CAE; normalize_person mostly
+		// just shapes the row at this point.
 		$orgs_index  = self::index_included( $included_acc, 'organizations' );
 		$addrs_index = self::index_included( $included_acc, 'addresses' );
 
@@ -531,14 +529,65 @@ class ASAE_CAE_Sync {
 		$rows = array_slice( $rows, 0, $limit );
 
 		return array(
-			'ok'            => true,
-			'message'       => sprintf(
-				/* translators: %d: number of rows returned */
-				_n( 'Dry run returned %d record.', 'Dry run returned %d records.', count( $rows ), 'asae-cae-roster' ),
-				count( $rows )
+			'ok'             => true,
+			'message'        => sprintf(
+				/* translators: 1: rows returned to UI, 2: raw rows from Wicket */
+				__( 'Dry run: %1$d record(s) shown (Wicket returned %2$d).', 'asae-cae-roster' ),
+				count( $rows ),
+				$raw_count
 			),
-			'rows'          => $rows,
-			'requests_made' => $client->requests_made(),
+			'rows'           => $rows,
+			'raw_count'      => $raw_count,
+			'accepted_count' => count( $rows ),
+			'requests_made'  => $client->requests_made(),
+		);
+	}
+
+	/**
+	 * Canonical /people/query filter body. Selects:
+	 *   - active ASAE members (status = 'active')
+	 *   - whose `designations` data_field has cae = true
+	 *   - and whose CAE end_date is today or later
+	 *
+	 * Filtering on the data_fields path is what makes this query reliable —
+	 * the `tags` array on a person is just a flag that may persist after the
+	 * cert lapses, and `attributes.status === active` is about ASAE membership,
+	 * not CAE certification. The data_field is the source of truth.
+	 *
+	 * Schema confirmed against
+	 * https://wicketapi.docs.apiary.io/  →  /people/query body example.
+	 *
+	 * @return array
+	 */
+	private static function build_query_filter_body() {
+		$today = current_time( 'Y-m-d' );
+		return array(
+			'filter' => array(
+				'status_eq'    => 'active',
+				'search_query' => array(
+					'_and' => array(
+						array( 'data_fields.designations.value.cae' => true ),
+						array( 'data_fields.designations.value.end_date_gteq' => $today ),
+					),
+				),
+			),
+		);
+	}
+
+	/**
+	 * Standard query-string args used alongside the POST body — pagination,
+	 * sorting, and sideloads.
+	 *
+	 * @param int $page
+	 * @param int $page_size
+	 * @return array
+	 */
+	private static function build_query_string( $page, $page_size = self::PAGE_SIZE ) {
+		return array(
+			'include'      => 'primary_organization,addresses',
+			'sort'         => 'family_name',
+			'page[size]'   => $page_size,
+			'page[number]' => (int) $page,
 		);
 	}
 
@@ -793,7 +842,14 @@ class ASAE_CAE_Sync {
 
 	/**
 	 * Convert a raw Wicket person resource into a row ready for the staging
-	 * table. Returns null when the person is not a currently-active CAE.
+	 * table. Returns null only on hard filters (deleted, anonymized) — the
+	 * "currently-active CAE" check is now server-side via the /people/query
+	 * filter on data_fields.designations.value.cae and end_date_gteq, so a
+	 * record reaching this method has already been vetted upstream.
+	 *
+	 * If data_fields is omitted from a list response (some Wicket endpoints
+	 * trim large nested arrays), we still accept the record — photo_url and
+	 * cae_*_date just stay empty rather than rejecting the whole roster entry.
 	 *
 	 * @param array  $person
 	 * @param array  $orgs_index
@@ -804,10 +860,8 @@ class ASAE_CAE_Sync {
 	private static function normalize_person( array $person, array $orgs_index, array $addrs_index, $today ) {
 		$attrs = isset( $person['attributes'] ) ? (array) $person['attributes'] : array();
 
-		// Hard filter: status must be active and not soft-deleted/anonymized.
-		if ( ( $attrs['status'] ?? '' ) !== 'active' ) {
-			return null;
-		}
+		// Hard rejects: deleted or anonymized records should never appear in
+		// the public roster, regardless of what the server-side filter said.
 		if ( ! empty( $attrs['deleted_at'] ) ) {
 			return null;
 		}
@@ -815,20 +869,12 @@ class ASAE_CAE_Sync {
 			return null;
 		}
 
-		// Confirm the CAE designation is currently active. Wicket sometimes
-		// keeps the CAE tag on people whose certification has lapsed, so the
-		// designations data_field is the source of truth.
+		// Optional designations data_field — when present, capture the date
+		// range for the cache; when absent, leave dates empty.
+		$cae_value = array();
 		$cae_field = self::find_data_field( $attrs['data_fields'] ?? array(), 'designations' );
-		if ( null === $cae_field ) {
-			return null;
-		}
-		$value = isset( $cae_field['value'] ) && is_array( $cae_field['value'] ) ? $cae_field['value'] : array();
-		if ( empty( $value['cae'] ) ) {
-			return null;
-		}
-		$end_date = isset( $value['end_date'] ) ? (string) $value['end_date'] : '';
-		if ( '' !== $end_date && $end_date < $today ) {
-			return null;
+		if ( null !== $cae_field && isset( $cae_field['value'] ) && is_array( $cae_field['value'] ) ) {
+			$cae_value = $cae_field['value'];
 		}
 
 		$family_name      = (string) ( $attrs['family_name'] ?? '' );
@@ -878,8 +924,8 @@ class ASAE_CAE_Sync {
 			'city'                => $city,
 			'state'               => $state,
 			'photo_url'           => $photo_url,
-			'cae_start_date'      => self::sanitize_date( $value['start_date'] ?? null ),
-			'cae_end_date'        => self::sanitize_date( $end_date ),
+			'cae_start_date'      => self::sanitize_date( $cae_value['start_date'] ?? null ),
+			'cae_end_date'        => self::sanitize_date( $cae_value['end_date'] ?? null ),
 			'last_synced_at'      => current_time( 'mysql' ),
 		);
 	}

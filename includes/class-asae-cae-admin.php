@@ -379,21 +379,17 @@ class ASAE_CAE_Admin {
 	public static function ajax_dry_run(): void {
 		self::verify_ajax();
 		$result = ASAE_CAE_Sync::dry_run( 50 );
-		if ( ! empty( $result['ok'] ) ) {
-			wp_send_json_success(
-				array(
-					'message'       => $result['message'],
-					'rows'          => $result['rows'],
-					'requests_made' => (int) $result['requests_made'],
-				)
-			);
-		}
-		wp_send_json_error(
-			array(
-				'message'       => $result['message'],
-				'requests_made' => (int) $result['requests_made'],
-			)
+		$payload = array(
+			'message'        => $result['message'],
+			'rows'           => $result['rows'] ?? array(),
+			'raw_count'      => (int) ( $result['raw_count'] ?? 0 ),
+			'accepted_count' => (int) ( $result['accepted_count'] ?? 0 ),
+			'requests_made'  => (int) ( $result['requests_made'] ?? 0 ),
 		);
+		if ( ! empty( $result['ok'] ) ) {
+			wp_send_json_success( $payload );
+		}
+		wp_send_json_error( $payload );
 	}
 
 	/**

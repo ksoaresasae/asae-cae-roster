@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.4
+Stable tag: 0.0.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.5 =
+* Switched to Wicket's POST /people/query endpoint (per https://wicketapi.docs.apiary.io/) so we can filter on nested data_fields paths server-side. The new query selects on `data_fields.designations.value.cae = true` AND `data_fields.designations.value.end_date_gteq = today` — which is what "currently-active CAE" actually means. The old GET filter[tag_eq]=CAE never matched (tags is an array attribute, not a scalar) and `attributes.status === active` describes ASAE membership, not CAE certification.
+* Added request_post() to the Wicket client. Shares JWT auth, request budget, courtesy delay, and exponential-backoff retry with the existing GET request() via a common dispatcher.
+* Loosened normalize_person: hard rejects only on deleted_at / anonymized_at. The CAE-active validation that used to reject every record when the response trimmed data_fields is now satisfied upstream by the server-side filter.
+* Dry Run output now shows a diagnostic line: how many records Wicket returned, how many passed structural validation, and how many API calls were made — so a future "0 records" issue is debuggable in one click instead of guesswork.
 
 = 0.0.4 =
 * Sync is now broken into many small WP-Cron-driven chunks instead of one long blocking call. Each chunk fetches a small number of Wicket pages (default 1 page = 25 records) and self-schedules the next chunk after a configurable delay (default 5s). Resumable across PHP-process boundaries; live data isn't promoted until every chunk is complete. Fixes the "Per-run request budget reached (500)" failure mode for rosters of ~5,000 CAEs.

@@ -270,11 +270,16 @@
 
 			postAjax('asae_cae_dry_run')
 				.then(function (data) {
-					if (data && data.success && data.data && Array.isArray(data.data.rows)) {
-						setStatus(stat, data.data.message || S.dryRunOk, 'ok');
-						renderDryRunResults(results, data.data.rows);
+					var d = data && data.data;
+					if (data && data.success && d && Array.isArray(d.rows)) {
+						setStatus(stat, d.message || S.dryRunOk, 'ok');
+						renderDryRunResults(results, d.rows, d);
 					} else {
-						setStatus(stat, (data && data.data && data.data.message) || S.dryRunError, 'err');
+						setStatus(stat, (d && d.message) || S.dryRunError, 'err');
+						// Even on the error path, show diagnostics if we have them.
+						if (d && (typeof d.raw_count !== 'undefined' || typeof d.requests_made !== 'undefined')) {
+							renderDryRunResults(results, [], d);
+						}
 					}
 				})
 				.catch(function () { setStatus(stat, S.dryRunError, 'err'); })
@@ -282,10 +287,32 @@
 		});
 	}
 
-	function renderDryRunResults(container, rows) {
+	function renderDryRunResults(container, rows, meta) {
 		if (!container) { return; }
+		container.innerHTML = '';
+
+		// Diagnostic bar — always present so failures are debuggable.
+		if (meta) {
+			var diag = document.createElement('p');
+			diag.className = 'asae-cae-dry-run-diag';
+			var bits = [];
+			if (typeof meta.raw_count !== 'undefined') {
+				bits.push('Wicket returned ' + meta.raw_count + ' record(s)');
+			}
+			if (typeof meta.accepted_count !== 'undefined') {
+				bits.push(meta.accepted_count + ' passed structural validation');
+			}
+			if (typeof meta.requests_made !== 'undefined') {
+				bits.push(meta.requests_made + ' API call(s)');
+			}
+			diag.textContent = bits.join(' · ');
+			container.appendChild(diag);
+		}
+
 		if (!rows.length) {
-			container.innerHTML = '<p><em>No CAE records returned.</em></p>';
+			var empty = document.createElement('p');
+			empty.innerHTML = '<em>No CAE records returned.</em>';
+			container.appendChild(empty);
 			container.hidden = false;
 			return;
 		}
