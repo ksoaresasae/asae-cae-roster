@@ -464,6 +464,7 @@ class ASAE_CAE_Sync {
 		$included_acc = array();
 		$today        = current_time( 'Y-m-d' );
 		$body         = self::build_query_filter_body();
+		$first_resp   = null;
 
 		try {
 			for ( $page = 1; $page <= $pages_needed && count( $data_acc ) < $limit; $page++ ) {
@@ -472,6 +473,9 @@ class ASAE_CAE_Sync {
 					self::build_query_string( $page ),
 					$body
 				);
+				if ( null === $first_resp ) {
+					$first_resp = $resp;
+				}
 				$data     = isset( $resp['data'] ) ? (array) $resp['data'] : array();
 				$included = isset( $resp['included'] ) ? (array) $resp['included'] : array();
 				foreach ( $data as $row ) {
@@ -486,16 +490,38 @@ class ASAE_CAE_Sync {
 			}
 		} catch ( ASAE_CAE_Wicket_Exception $e ) {
 			return array(
-				'ok'            => false,
-				'message'       => $e->getMessage(),
-				'rows'          => array(),
-				'raw_count'     => 0,
+				'ok'             => false,
+				'message'        => $e->getMessage(),
+				'rows'           => array(),
+				'raw_count'      => 0,
 				'accepted_count' => 0,
-				'requests_made' => $client->requests_made(),
+				'requests_made'  => $client->requests_made(),
+				'endpoint'       => 'POST /people/query',
+				'query_body'     => $body,
+				'response_keys'  => array(),
+				'response_meta'  => null,
+				'baseline_count' => null,
 			);
 		}
 
 		$raw_count = count( $data_acc );
+
+		// Diagnostic baseline: when the primary filter returned 0 records,
+		// confirm whether the tenant has data at all. A successful baseline
+		// pinpoints the filter as the problem; a failing baseline points at
+		// auth/endpoint/empty-tenant.
+		$baseline_count = null;
+		if ( 0 === $raw_count ) {
+			try {
+				$baseline = $client->request(
+					'people',
+					array( 'page[size]' => 3 )
+				);
+				$baseline_count = isset( $baseline['data'] ) ? count( (array) $baseline['data'] ) : 0;
+			} catch ( ASAE_CAE_Wicket_Exception $e ) {
+				$baseline_count = -1; // signals "baseline call also threw"
+			}
+		}
 
 		// Normalize → keep records that pass our (now-loose) structural validation.
 		// With server-side filtering on data_fields.designations, every returned
@@ -540,6 +566,11 @@ class ASAE_CAE_Sync {
 			'raw_count'      => $raw_count,
 			'accepted_count' => count( $rows ),
 			'requests_made'  => $client->requests_made(),
+			'endpoint'       => 'POST /people/query',
+			'query_body'     => $body,
+			'response_keys'  => is_array( $first_resp ) ? array_keys( $first_resp ) : array(),
+			'response_meta'  => is_array( $first_resp ) && isset( $first_resp['meta'] ) ? $first_resp['meta'] : null,
+			'baseline_count' => $baseline_count,
 		);
 	}
 

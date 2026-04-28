@@ -131,7 +131,10 @@ class ASAE_CAE_Admin {
 					'stopError'        => __( 'Could not stop active jobs.', 'asae-cae-roster' ),
 					'stopConfirm'      => __( 'Stop all active sync jobs? Any in-progress sync will abort cleanly and the live roster will remain unchanged.', 'asae-cae-roster' ),
 					'checkingUpdates'  => __( 'Checking for updates…', 'asae-cae-roster' ),
-					'updatesChecked'   => __( 'Update check complete. Refresh the Plugins page to see results.', 'asae-cae-roster' ),
+					'updateAvailable'  => __( 'Update available: v%1$s — %2$s', 'asae-cae-roster' ),
+					'updateLink'       => __( 'Go to Plugins page', 'asae-cae-roster' ),
+					'updateNone'       => __( 'You are running the latest version (v%s).', 'asae-cae-roster' ),
+					'updateUnknown'    => __( 'Could not read the latest release from GitHub.', 'asae-cae-roster' ),
 					'updatesError'     => __( 'Update check failed. Please try again.', 'asae-cae-roster' ),
 					'pickPhotoTitle'   => __( 'Select default photo', 'asae-cae-roster' ),
 					'pickPhotoButton'  => __( 'Use this photo', 'asae-cae-roster' ),
@@ -236,18 +239,44 @@ class ASAE_CAE_Admin {
 	// ── AJAX handlers ────────────────────────────────────────────────────────
 
 	/**
-	 * Force a fresh GitHub-update check (clears the updater's transient).
+	 * Force a fresh GitHub-update check (clears the updater's transient) and
+	 * return enough info for the admin UI to say "Update available: vX.Y.Z"
+	 * vs "You are running the latest version" without forcing the user to
+	 * navigate to the Plugins page.
+	 *
+	 * Mirrors asae-content-ingestor's ajax_check_updates response shape.
 	 *
 	 * @return void
 	 */
 	public static function ajax_check_updates(): void {
 		self::verify_ajax();
+
+		// Clear the updater's release cache + WP's plugin update transient so
+		// the next read pulls fresh data from GitHub.
 		delete_transient( 'asae_cae_github_release' );
 		delete_site_transient( 'update_plugins' );
+
+		// Now ask the updater to fetch the latest release directly. This
+		// repopulates the transient as a side-effect.
+		$updater = new ASAE_CAE_GitHub_Updater();
+		$release = $updater->get_latest_release();
+
+		// Trigger the WP update transient too, so the Plugins page reflects
+		// the new state if the user navigates there.
 		wp_update_plugins();
+
+		$latest_version = ( $release && isset( $release->tag_name ) )
+			? ltrim( (string) $release->tag_name, 'vV' )
+			: null;
+		$update_available = (bool) ( $latest_version && version_compare( $latest_version, ASAE_CAE_VERSION, '>' ) );
+
 		wp_send_json_success(
 			array(
-				'message' => __( 'Update check complete. Refresh the Plugins page to see results.', 'asae-cae-roster' ),
+				'current_version'  => ASAE_CAE_VERSION,
+				'latest_version'   => $latest_version,
+				'update_available' => $update_available,
+				'plugins_url'      => admin_url( 'plugins.php' ),
+				'release_url'      => $release && isset( $release->html_url ) ? (string) $release->html_url : '',
 			)
 		);
 	}
@@ -378,13 +407,18 @@ class ASAE_CAE_Admin {
 	 */
 	public static function ajax_dry_run(): void {
 		self::verify_ajax();
-		$result = ASAE_CAE_Sync::dry_run( 50 );
+		$result  = ASAE_CAE_Sync::dry_run( 50 );
 		$payload = array(
 			'message'        => $result['message'],
 			'rows'           => $result['rows'] ?? array(),
 			'raw_count'      => (int) ( $result['raw_count'] ?? 0 ),
 			'accepted_count' => (int) ( $result['accepted_count'] ?? 0 ),
 			'requests_made'  => (int) ( $result['requests_made'] ?? 0 ),
+			'endpoint'       => $result['endpoint'] ?? '',
+			'query_body'     => $result['query_body'] ?? null,
+			'response_keys'  => $result['response_keys'] ?? array(),
+			'response_meta'  => $result['response_meta'] ?? null,
+			'baseline_count' => array_key_exists( 'baseline_count', $result ) ? $result['baseline_count'] : null,
 		);
 		if ( ! empty( $result['ok'] ) ) {
 			wp_send_json_success( $payload );

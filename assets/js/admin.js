@@ -291,7 +291,7 @@
 		if (!container) { return; }
 		container.innerHTML = '';
 
-		// Diagnostic bar — always present so failures are debuggable.
+		// Top-line diagnostic — always present so failures are debuggable.
 		if (meta) {
 			var diag = document.createElement('p');
 			diag.className = 'asae-cae-dry-run-diag';
@@ -307,6 +307,51 @@
 			}
 			diag.textContent = bits.join(' · ');
 			container.appendChild(diag);
+
+			// Detailed diagnostics — surface the request body, response shape,
+			// and (when zero records) the baseline GET probe. Hidden inside a
+			// <details> so it doesn't dominate the UI when things are working.
+			var det = document.createElement('details');
+			det.className = 'asae-cae-dry-run-detail';
+			var summary = document.createElement('summary');
+			summary.textContent = 'Diagnostic detail (request + response)';
+			det.appendChild(summary);
+
+			function addRow(label, value) {
+				var row = document.createElement('p');
+				row.className = 'asae-cae-dry-run-detail-row';
+				var b = document.createElement('strong');
+				b.textContent = label + ': ';
+				row.appendChild(b);
+				if (typeof value === 'string') {
+					row.appendChild(document.createTextNode(value));
+				} else {
+					var pre = document.createElement('pre');
+					pre.textContent = JSON.stringify(value, null, 2);
+					row.appendChild(pre);
+				}
+				det.appendChild(row);
+			}
+
+			if (meta.endpoint)        { addRow('Endpoint', meta.endpoint); }
+			if (meta.query_body)      { addRow('Request body', meta.query_body); }
+			if (meta.response_keys && meta.response_keys.length) {
+				addRow('Response top-level keys', meta.response_keys.join(', '));
+			}
+			if (meta.response_meta)   { addRow('Response meta', meta.response_meta); }
+			if (typeof meta.baseline_count !== 'undefined' && meta.baseline_count !== null) {
+				var baselineMsg;
+				if (meta.baseline_count === -1) {
+					baselineMsg = 'baseline GET /people also threw an exception (auth or endpoint issue)';
+				} else if (meta.baseline_count === 0) {
+					baselineMsg = '0 — Wicket /people returned nothing even without filters (empty tenant or auth scoped out)';
+				} else {
+					baselineMsg = meta.baseline_count + ' — tenant has data; the filter is rejecting everything';
+				}
+				addRow('Baseline GET /people?page[size]=3', baselineMsg);
+			}
+
+			container.appendChild(det);
 		}
 
 		if (!rows.length) {
@@ -410,10 +455,32 @@
 
 			postAjax('asae_cae_check_updates')
 				.then(function (data) {
-					if (data && data.success) {
-						setStatus(stat, (data.data && data.data.message) || S.updatesChecked, 'ok');
-					} else {
+					if (!data || !data.success || !data.data) {
 						setStatus(stat, (data && data.data && data.data.message) || S.updatesError, 'err');
+						return;
+					}
+					var d = data.data;
+
+					if (!d.latest_version) {
+						setStatus(stat, S.updateUnknown, 'err');
+						return;
+					}
+
+					if (d.update_available) {
+						// Build "Update available: vX.Y.Z — Go to Plugins page" with a real link.
+						stat.classList.remove('asae-cae-msg-ok', 'asae-cae-msg-err', 'asae-cae-msg-busy');
+						stat.classList.add('asae-cae-msg-err'); // red — user attention
+						stat.textContent = '';
+						var prefix = S.updateAvailable
+							.replace('%1$s', d.latest_version)
+							.replace('%2$s', '');
+						stat.appendChild(document.createTextNode(prefix));
+						var link = document.createElement('a');
+						link.href = d.plugins_url || '#';
+						link.textContent = S.updateLink;
+						stat.appendChild(link);
+					} else {
+						setStatus(stat, S.updateNone.replace('%s', d.current_version), 'ok');
 					}
 				})
 				.catch(function () { setStatus(stat, S.updatesError, 'err'); })

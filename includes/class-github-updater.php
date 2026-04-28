@@ -145,8 +145,12 @@ class ASAE_CAE_GitHub_Updater {
 
 	/**
 	 * Fetch the latest release from GitHub. Cached for 6 hours via transient.
+	 *
+	 * Public so the Settings tab's "Check for Updates Now" handler can compare
+	 * the current installed version to what's available on GitHub Releases and
+	 * report it back to the admin (matches asae-content-ingestor's pattern).
 	 */
-	private function get_latest_release() {
+	public function get_latest_release() {
 		if ( $this->github_release !== null ) {
 			return $this->github_release;
 		}

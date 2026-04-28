@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.5
+Stable tag: 0.0.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.6 =
+* Check for Updates Now now reports its findings inline (matches asae-content-ingestor's pattern). When a newer release is found on GitHub the Settings tab shows "Update available: vX.Y.Z — Go to Plugins page" in red with a working link; otherwise it shows "You are running the latest version (vX.Y.Z)" in green. The previous behavior — generic "Update check complete, refresh the Plugins page" — gave no signal whether anything was actually pending.
+* Made ASAE_CAE_GitHub_Updater::get_latest_release() public so the Check for Updates handler can compare current to remote.
+* Dry Run output now includes a "Diagnostic detail" disclosure with the exact JSON request body, response top-level keys, response meta, and a baseline GET /people probe that runs automatically when the primary filter returns zero. Lets us see whether the filter is rejecting matches or the tenant has no data, without further code iteration.
 
 = 0.0.5 =
 * Switched to Wicket's POST /people/query endpoint (per https://wicketapi.docs.apiary.io/) so we can filter on nested data_fields paths server-side. The new query selects on `data_fields.designations.value.cae = true` AND `data_fields.designations.value.end_date_gteq = today` — which is what "currently-active CAE" actually means. The old GET filter[tag_eq]=CAE never matched (tags is an array attribute, not a scalar) and `attributes.status === active` describes ASAE membership, not CAE certification.
