@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.7
+Stable tag: 0.0.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.8 =
+* Production sync filter now uses two independent fields AND'd together: data_fields.designations.value.cae = true AND data_fields.designations.value.cae_type = "cae". Both returned the same 4,736-record count in the v0.0.7 diagnostic probes; AND-ing them costs nothing and acts as cross-validation against either field drifting in the future.
+* Removed the server-side end_date_gteq filter. Wicket's search_query syntax does NOT support predicate suffixes (_eq, _gteq, etc.) on nested data_fields paths — the v0.0.7 probes confirmed this (the variant with `_eq` suffix returned 0 while the otherwise-identical implicit-equality variant returned 4,736). The "currently active CAE" date check is now performed client-side in normalize_person against designations.value.end_date.
+* Trimmed Check for Updates "no releases" message from a multi-line tutorial to "No releases found." Diagnostic detail removed from the routine UX path.
 
 = 0.0.7 =
 * Check for Updates now distinguishes "no GitHub releases tagged yet" (cure-able by `git tag vX.Y.Z && git push origin vX.Y.Z`) from "couldn't reach api.github.com." Settings tab message is actionable instead of misleading.

@@ -725,28 +725,28 @@ class ASAE_CAE_Sync {
 	/**
 	 * Canonical /people/query filter body. Selects:
 	 *   - active ASAE members (status = 'active')
-	 *   - whose `designations` data_field has cae = true
-	 *   - and whose CAE end_date is today or later
+	 *   - whose designations data_field flags them as a CAE, validated via two
+	 *     independent fields (cae = true AND cae_type = "cae"). On the v0.0.7
+	 *     diagnostic probes both filters returned the same 4,736-record count,
+	 *     so AND-ing them costs nothing today; if Wicket's data ever drifts
+	 *     between the boolean flag and the categorical type, the AND catches it.
 	 *
-	 * Filtering on the data_fields path is what makes this query reliable —
-	 * the `tags` array on a person is just a flag that may persist after the
-	 * cert lapses, and `attributes.status === active` is about ASAE membership,
-	 * not CAE certification. The data_field is the source of truth.
-	 *
-	 * Schema confirmed against
-	 * https://wicketapi.docs.apiary.io/  →  /people/query body example.
+	 * NOTE: A server-side end_date_gteq filter on this nested path does NOT
+	 * work — predicate suffixes like `_gteq` only apply to top-level filter
+	 * keys, not paths inside search_query. The "currently active" date check
+	 * is performed client-side in normalize_person() on each returned record
+	 * by comparing designations.value.end_date to today.
 	 *
 	 * @return array
 	 */
 	private static function build_query_filter_body() {
-		$today = current_time( 'Y-m-d' );
 		return array(
 			'filter' => array(
 				'status_eq'    => 'active',
 				'search_query' => array(
 					'_and' => array(
-						array( 'data_fields.designations.value.cae' => true ),
-						array( 'data_fields.designations.value.end_date_gteq' => $today ),
+						array( 'data_fields.designations.value.cae'      => true ),
+						array( 'data_fields.designations.value.cae_type' => 'cae' ),
 					),
 				),
 			),
@@ -1054,6 +1054,15 @@ class ASAE_CAE_Sync {
 		$cae_field = self::find_data_field( $attrs['data_fields'] ?? array(), 'designations' );
 		if ( null !== $cae_field && isset( $cae_field['value'] ) && is_array( $cae_field['value'] ) ) {
 			$cae_value = $cae_field['value'];
+		}
+
+		// Client-side date filter — Wicket can't enforce end_date_gteq inside
+		// search_query (predicate suffixes don't work on nested data_fields
+		// paths), so we filter expired CAEs here. When end_date is missing
+		// we trust the server-side cae=true flag and accept the record.
+		$end_date = isset( $cae_value['end_date'] ) ? (string) $cae_value['end_date'] : '';
+		if ( '' !== $end_date && $end_date < $today ) {
+			return null;
 		}
 
 		$family_name      = (string) ( $attrs['family_name'] ?? '' );

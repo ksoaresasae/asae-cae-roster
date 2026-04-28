@@ -134,7 +134,7 @@ class ASAE_CAE_Admin {
 					'updateAvailable'  => __( 'Update available: v%1$s — %2$s', 'asae-cae-roster' ),
 					'updateLink'       => __( 'Go to Plugins page', 'asae-cae-roster' ),
 					'updateNone'       => __( 'You are running the latest version (v%s).', 'asae-cae-roster' ),
-					'updateNoReleases' => __( 'No GitHub releases found yet. Tag a version (e.g. `git tag v%s && git push origin v%s`) to publish a release; the workflow builds the zip automatically.', 'asae-cae-roster' ),
+					'updateNoReleases' => __( 'No releases found.', 'asae-cae-roster' ),
 					'updateUnknown'    => __( 'Could not contact api.github.com. Check the network or try again in a moment.', 'asae-cae-roster' ),
 					'updatesError'     => __( 'Update check failed. Please try again.', 'asae-cae-roster' ),
 					'pickPhotoTitle'   => __( 'Select default photo', 'asae-cae-roster' ),

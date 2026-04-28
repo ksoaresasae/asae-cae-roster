@@ -514,17 +514,8 @@
 					var d = data.data;
 
 					if (!d.latest_version) {
-						// Differentiate "no releases tagged yet" (cure-able via git tag)
-						// from "couldn't reach GitHub" (transient network).
-						if (d.no_releases) {
-							setStatus(
-								stat,
-								S.updateNoReleases.replace(/%s/g, d.current_version),
-								'err'
-							);
-						} else {
-							setStatus(stat, S.updateUnknown, 'err');
-						}
+						// Differentiate "no releases tagged yet" from "couldn't reach GitHub".
+						setStatus(stat, d.no_releases ? S.updateNoReleases : S.updateUnknown, 'err');
 						return;
 					}
 
