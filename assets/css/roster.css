@@ -30,15 +30,23 @@
 /* Defensive: make sure neither the region wrapper nor the search form
  * ever shows a focus ring around the entire widget — these elements
  * aren't interactive themselves, so a focus indicator on them gives
- * misleading feedback. */
+ * misleading feedback. !important is required because the typical
+ * culprit is a theme-level `[tabindex="-1"]:focus` rule (themes add
+ * tabindex="-1" to landmark regions for skip-link targeting). The
+ * [tabindex] selector here covers the case where our wrapper picks
+ * up that attribute via the theme. */
 .asae-cae-roster:focus,
 .asae-cae-roster:focus-visible,
 .asae-cae-roster:focus-within,
+.asae-cae-roster[tabindex]:focus,
+.asae-cae-roster[tabindex]:focus-visible,
 .asae-cae-search:focus,
 .asae-cae-search:focus-visible,
-.asae-cae-search:focus-within {
-	outline: none;
-	box-shadow: none;
+.asae-cae-search:focus-within,
+.asae-cae-search[tabindex]:focus,
+.asae-cae-search[tabindex]:focus-visible {
+	outline: none !important;
+	box-shadow: none !important;
 }
 
 /* Search form. */
@@ -118,11 +126,15 @@
 	cursor: not-allowed;
 }
 
-/* Result summary (shown during search). */
-.asae-cae-result-summary {
-	margin: 0 0 1em;
-	font-style: italic;
+/* Unified results summary line — "Showing X - Y of Z results in <nav>" /
+ * "matching <search>". Rendered both above the listing and above the
+ * pagination (when there's more than one page). Centered so it visually
+ * spans the full width of the listing grid. */
+.asae-cae-results-summary {
+	margin: 1em 0;
+	text-align: center;
 	color: #50575e;
+	font-style: italic;
 }
 
 .asae-cae-empty {

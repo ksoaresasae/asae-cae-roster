@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.13
+Stable tag: 0.0.14
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.14 =
+* New: unified results-summary line — "Showing X - Y of Z results in <nav>" for All/letter views, or "Showing X - Y of Z results matching "<term>"" for searches. Replaces the old "X matches for 'term'" search-only summary so all three navigation modes share a consistent pattern. Rendered both above the listing (with role=status so screen readers announce result-count changes) and above the pagination (when there's more than one page); centered to span the listing's full width.
+* Fix: visible focus outline around the entire shortcode after a search or letter-nav click was still appearing despite the v0.0.13 reset. Root cause was a theme-level `[tabindex="-1"]:focus` rule that was tying with our reset on specificity and winning by load order — themes apply tabindex="-1" to landmark regions to make skip links land focus there. Switched the wrapper / search-form focus reset to `outline: none !important; box-shadow: none !important;` and added `[tabindex]` selector variants so the override unambiguously wins regardless of theme load order.
 
 = 0.0.13 =
 * New: "All" navigation item before "A" in the letter nav, and "All" is now the default landing view. Previously the shortcode defaulted to letter A, giving undue weight to people whose surnames started with that letter. The All view paginates across the entire roster using the same items-per-page count as letter views.

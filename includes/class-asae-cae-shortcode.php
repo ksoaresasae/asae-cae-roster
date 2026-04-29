@@ -133,19 +133,6 @@ class ASAE_CAE_Shortcode {
 				<?php self::render_letter_nav( $active_letters, $state['letter'] ); ?>
 			<?php endif; ?>
 
-			<?php if ( '' !== $state['search'] ) : ?>
-				<p class="asae-cae-result-summary" role="status">
-					<?php
-					printf(
-						/* translators: 1: total number of results, 2: search term */
-						esc_html( _n( '%1$d match for "%2$s"', '%1$d matches for "%2$s"', $total, 'asae-cae-roster' ) ),
-						(int) $total,
-						esc_html( $state['search'] )
-					);
-					?>
-				</p>
-			<?php endif; ?>
-
 			<?php if ( empty( $records ) ) : ?>
 				<p class="asae-cae-empty">
 					<?php
@@ -157,11 +144,17 @@ class ASAE_CAE_Shortcode {
 					?>
 				</p>
 			<?php else : ?>
+				<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], true ); ?>
+
 				<ul class="asae-cae-list">
 					<?php foreach ( $records as $rec ) : ?>
 						<?php self::render_card( $rec ); ?>
 					<?php endforeach; ?>
 				</ul>
+
+				<?php if ( $total_pages > 1 ) : ?>
+					<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], false ); ?>
+				<?php endif; ?>
 
 				<?php self::render_pagination( $state['page'], $total_pages ); ?>
 			<?php endif; ?>
@@ -357,6 +350,84 @@ class ASAE_CAE_Shortcode {
 	}
 
 	// ── Sub-renderers ────────────────────────────────────────────────────────
+
+	/**
+	 * Render a unified "Showing X - Y of Z results in <nav>" / "matching
+	 * <search>" line that's used in three places visually:
+	 *
+	 *   - All view:    "Showing 1 - 50 of 4,367 results in All"
+	 *   - Letter S:    "Showing 1 - 50 of 218 results in S"
+	 *   - Search foo:  "Showing 1 - 50 of 78 results matching "foo""
+	 *
+	 * Replaces the old "X matches for 'searchterm'" summary so all three
+	 * navigation modes share a consistent pattern. The top-of-results
+	 * instance is marked role="status" (live region, polite) so screen
+	 * readers announce result-count changes when the user clicks a letter
+	 * or runs a search; the bottom instance is plain text to avoid
+	 * duplicate announcements.
+	 *
+	 * @param int    $current_page  1-based page index.
+	 * @param int    $per_page      Configured items-per-page.
+	 * @param int    $count_on_page Records actually rendered on this page.
+	 * @param int    $total         Total result count for the active filter.
+	 * @param string $letter        Active letter ('' = All view).
+	 * @param string $search        Active search term ('' = no search).
+	 * @param bool   $top           True for the top instance (gets role=status).
+	 * @return void
+	 */
+	private static function render_results_summary(
+		int $current_page,
+		int $per_page,
+		int $count_on_page,
+		int $total,
+		string $letter,
+		string $search,
+		bool $top
+	): void {
+		if ( $total <= 0 || $count_on_page <= 0 ) {
+			return;
+		}
+
+		$start = ( $current_page - 1 ) * $per_page + 1;
+		$end   = $start + $count_on_page - 1;
+
+		if ( '' !== $search ) {
+			$text = sprintf(
+				/* translators: 1: first item index, 2: last item index, 3: total count, 4: search term */
+				_n(
+					'Showing %1$s - %2$s of %3$s result matching "%4$s"',
+					'Showing %1$s - %2$s of %3$s results matching "%4$s"',
+					$total,
+					'asae-cae-roster'
+				),
+				number_format_i18n( $start ),
+				number_format_i18n( $end ),
+				number_format_i18n( $total ),
+				$search
+			);
+		} else {
+			$nav  = ( '' === $letter ) ? __( 'All', 'asae-cae-roster' ) : $letter;
+			$text = sprintf(
+				/* translators: 1: first item index, 2: last item index, 3: total count, 4: nav choice (All or letter) */
+				_n(
+					'Showing %1$s - %2$s of %3$s result in %4$s',
+					'Showing %1$s - %2$s of %3$s results in %4$s',
+					$total,
+					'asae-cae-roster'
+				),
+				number_format_i18n( $start ),
+				number_format_i18n( $end ),
+				number_format_i18n( $total ),
+				$nav
+			);
+		}
+
+		printf(
+			'<p class="asae-cae-results-summary"%1$s>%2$s</p>',
+			$top ? ' role="status"' : '',
+			esc_html( $text )
+		);
+	}
 
 	/**
 	 * Render the A-Z letter navigation, prefixed with an "All" item that
