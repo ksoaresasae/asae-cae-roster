@@ -475,8 +475,11 @@
 		}
 
 		// Build table via DOM (not innerHTML) so we don't have to escape strings
-		// manually — textContent handles it.
-		container.innerHTML = '';
+		// manually — textContent handles it. Don't clear the container here:
+		// the diagnostic disclosure (and top-line summary) were just appended
+		// above and need to stay visible alongside the results table. The
+		// initial container.innerHTML = '' at the top of this function is
+		// the only clear that should run.
 		var table = document.createElement('table');
 		table.className = 'widefat striped asae-cae-dry-run-table';
 

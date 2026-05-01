@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.16
+Stable tag: 0.0.17
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.17 =
+* Fix: Dry Run's "Diagnostic detail (request + response)" disclosure was being wiped from the results panel whenever the dry run returned at least one row. Cause: renderDryRunResults() in admin.js was appending the disclosure to the container, then doing container.innerHTML = '' just before rendering the records table — which erased the disclosure along with everything else. The disclosure-only-shows-on-empty-results behavior had been there since v0.0.13 but went unnoticed because the original use case (debugging zero-row state-field probes) hit the empty path. Removed the redundant clear so the disclosure (and its top-line summary) remain alongside the results table.
 
 = 0.0.16 =
 * New: State / Province dropdown is now grouped by country. The United States is special-cased to the top with all US states listed under it; other countries follow alphabetically with their respective provinces/regions. Country names render in Initial Caps, states/provinces render in ALL CAPS — the case difference IS the visual hierarchy (HTML <option> elements can't accept indented styling reliably across browsers, so case carries the meaning). Selecting a country option filters by that country regardless of state; selecting a state option filters by that state.
