@@ -77,15 +77,27 @@ class ASAE_CAE_Shortcode {
 		// Read state from URL query string (sanitized).
 		$state = self::read_state();
 
+		// The State/Province dropdown can hold either a state value or a
+		// "country:<NAME>" sentinel for country-only filtering. Parse it
+		// once into discrete (country, state) filter slots and use those
+		// downstream — the URL value still lives on $state['state'] for
+		// dropdown selection rendering.
+		list( $country_filter, $state_filter ) = self::parse_location_value( $state['state'] );
+
 		// Active letters drive the letter nav (disabled-styling for empties).
-		// When ANY of the three search filters (name/city/state) are active,
-		// the letter filter is ignored — the user has explicitly narrowed
-		// by other criteria. Otherwise an empty letter is the "All" view
-		// (entire roster, paginated). Invalid letters fall back to "All"
-		// rather than silently snapping to "A", which had given undue
-		// weight to people whose surnames started with that letter.
+		// When ANY of the four search filters (name/city/state/country) are
+		// active, the letter filter is ignored — the user has explicitly
+		// narrowed by other criteria. Otherwise an empty letter is the
+		// "All" view (entire roster, paginated). Invalid letters fall back
+		// to "All" rather than silently snapping to "A", which had given
+		// undue weight to people whose surnames started with that letter.
 		$active_letters = self::get_active_letters();
-		$has_filters    = ( '' !== $state['search'] || '' !== $state['city'] || '' !== $state['state'] );
+		$has_filters    = (
+			'' !== $state['search']
+			|| '' !== $state['city']
+			|| '' !== $state_filter
+			|| '' !== $country_filter
+		);
 		if ( $has_filters ) {
 			$state['letter'] = '';
 		} elseif ( '' !== $state['letter'] && ! in_array( $state['letter'], $active_letters, true ) ) {
@@ -95,7 +107,7 @@ class ASAE_CAE_Shortcode {
 		$per_page = max( 5, min( 100, ASAE_CAE_Settings::get_items_per_page() ) );
 		$offset   = ( $state['page'] - 1 ) * $per_page;
 
-		$total       = self::count_records( $state['letter'], $state['search'], $state['city'], $state['state'] );
+		$total       = self::count_records( $state['letter'], $state['search'], $state['city'], $state_filter, $country_filter );
 		$total_pages = $total > 0 ? (int) ceil( $total / $per_page ) : 1;
 
 		// Clamp page if the user supplied something out of range.
@@ -105,7 +117,7 @@ class ASAE_CAE_Shortcode {
 		}
 
 		$records = $total > 0
-			? self::fetch_records( $state['letter'], $state['search'], $state['city'], $state['state'], $offset, $per_page )
+			? self::fetch_records( $state['letter'], $state['search'], $state['city'], $state_filter, $country_filter, $offset, $per_page )
 			: array();
 
 		// Build the HTML in an output buffer so view-level helpers can echo.
@@ -129,7 +141,7 @@ class ASAE_CAE_Shortcode {
 					self::QP_STATE,
 				) );
 
-				$active_states = self::get_active_states();
+				$active_locations = self::get_active_locations();
 				?>
 				<div class="asae-cae-search-field">
 					<label for="asae-cae-q"><?php echo esc_html__( 'Search by name', 'asae-cae-roster' ); ?></label>
@@ -149,9 +161,11 @@ class ASAE_CAE_Shortcode {
 					<label for="asae-cae-state"><?php echo esc_html__( 'State / Province', 'asae-cae-roster' ); ?></label>
 					<select id="asae-cae-state" name="<?php echo esc_attr( self::QP_STATE ); ?>">
 						<option value=""><?php echo esc_html__( 'Any', 'asae-cae-roster' ); ?></option>
-						<?php foreach ( $active_states as $st ) : ?>
-							<option value="<?php echo esc_attr( $st ); ?>"<?php selected( $state['state'], $st ); ?>>
-								<?php echo esc_html( $st ); ?>
+						<?php foreach ( $active_locations as $loc ) : ?>
+							<option value="<?php echo esc_attr( $loc['value'] ); ?>"
+								class="asae-cae-loc-<?php echo esc_attr( $loc['type'] ); ?>"
+								<?php selected( $state['state'], $loc['value'] ); ?>>
+								<?php echo esc_html( $loc['label'] ); ?>
 							</option>
 						<?php endforeach; ?>
 					</select>
@@ -185,7 +199,7 @@ class ASAE_CAE_Shortcode {
 					?>
 				</p>
 			<?php else : ?>
-				<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], $state['city'], $state['state'], true ); ?>
+				<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], $state['city'], $state_filter, $country_filter, true ); ?>
 
 				<ul class="asae-cae-list">
 					<?php foreach ( $records as $rec ) : ?>
@@ -194,7 +208,7 @@ class ASAE_CAE_Shortcode {
 				</ul>
 
 				<?php if ( $total_pages > 1 ) : ?>
-					<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], $state['city'], $state['state'], false ); ?>
+					<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], $state['city'], $state_filter, $country_filter, false ); ?>
 				<?php endif; ?>
 
 				<?php self::render_pagination( $state['page'], $total_pages ); ?>
@@ -339,11 +353,12 @@ class ASAE_CAE_Shortcode {
 	}
 
 	/**
-	 * Total record count for the active letter / search / city / state filters.
+	 * Total record count for the active letter / search / city / state /
+	 * country filters.
 	 */
-	private static function count_records( string $letter, string $search, string $city, string $state ): int {
+	private static function count_records( string $letter, string $search, string $city, string $state, string $country ): int {
 		global $wpdb;
-		list( $where_sql, $where_args ) = self::build_where( $letter, $search, $city, $state );
+		list( $where_sql, $where_args ) = self::build_where( $letter, $search, $city, $state, $country );
 
 		$sql = 'SELECT COUNT(*) FROM ' . ASAE_CAE_DB::people_table() . $where_sql;
 		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -356,9 +371,9 @@ class ASAE_CAE_Shortcode {
 	 *
 	 * @return array<int,object>
 	 */
-	private static function fetch_records( string $letter, string $search, string $city, string $state, int $offset, int $limit ): array {
+	private static function fetch_records( string $letter, string $search, string $city, string $state, string $country, int $offset, int $limit ): array {
 		global $wpdb;
-		list( $where_sql, $where_args ) = self::build_where( $letter, $search, $city, $state );
+		list( $where_sql, $where_args ) = self::build_where( $letter, $search, $city, $state, $country );
 
 		$sql  = 'SELECT * FROM ' . ASAE_CAE_DB::people_table() . $where_sql .
 				' ORDER BY family_name ASC, given_name ASC, id ASC LIMIT %d OFFSET %d';
@@ -370,13 +385,14 @@ class ASAE_CAE_Shortcode {
 	}
 
 	/**
-	 * Build the parameterized WHERE clause for the four-way cumulative
-	 * filter (letter + name search + city LIKE + state exact match). Empty
-	 * filter values are skipped — none of the search inputs is required.
+	 * Build the parameterized WHERE clause for the five-way cumulative
+	 * filter (letter + name search + city LIKE + state exact + country
+	 * exact). Empty filter values are skipped — none of the search inputs
+	 * is required.
 	 *
 	 * @return array{0:string,1:array}
 	 */
-	private static function build_where( string $letter, string $search, string $city, string $state ): array {
+	private static function build_where( string $letter, string $search, string $city, string $state, string $country ): array {
 		global $wpdb;
 		$conds = array();
 		$args  = array();
@@ -404,25 +420,172 @@ class ASAE_CAE_Shortcode {
 			$args[]  = $state;
 		}
 
+		if ( '' !== $country ) {
+			$conds[] = 'country = %s';
+			$args[]  = $country;
+		}
+
 		$where_sql = $conds ? ' WHERE ' . implode( ' AND ', $conds ) : '';
 		return array( $where_sql, $args );
 	}
 
 	/**
-	 * Distinct non-empty state values from the live people table, sorted
-	 * for the state-filter dropdown. Empty when no roster has been synced
-	 * or every record's state field is blank.
+	 * Build the ordered location list for the State / Province dropdown.
+	 * Each country appears as an "Initial Caps" selectable entry, followed
+	 * by its constituent states/provinces as "ALL CAPS" entries. The US
+	 * is special-cased to the top; other countries are alphabetical by
+	 * canonical display name. Records with non-empty state but empty
+	 * country are grouped under a synthetic "(Other)" trailing section so
+	 * they're not lost from the dropdown.
 	 *
-	 * @return string[]
+	 * @return array<int, array{type:string, value:string, label:string}>
+	 *         Each entry is one <option> to render; `value` is what gets
+	 *         submitted (and parsed by parse_location_value()); `label` is
+	 *         the visible text (already case-formatted).
 	 */
-	private static function get_active_states(): array {
+	private static function get_active_locations(): array {
 		global $wpdb;
 		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-		$rows = $wpdb->get_col(
-			'SELECT DISTINCT state FROM ' . ASAE_CAE_DB::people_table() .
-			" WHERE state IS NOT NULL AND state != '' ORDER BY state ASC"
+		$rows = $wpdb->get_results(
+			'SELECT DISTINCT country, state FROM ' . ASAE_CAE_DB::people_table() .
+			" WHERE (country != '' OR state != '') ORDER BY country ASC, state ASC",
+			ARRAY_A
 		);
-		return $rows ? array_map( 'strval', $rows ) : array();
+		if ( ! $rows ) {
+			return array();
+		}
+
+		// Bucket: country (canonical display) → array of state values.
+		$buckets = array();
+		foreach ( $rows as $row ) {
+			$country_raw = trim( (string) ( $row['country'] ?? '' ) );
+			$state_raw   = trim( (string) ( $row['state'] ?? '' ) );
+			$country     = self::display_country_name( $country_raw );
+			if ( '' === $country ) {
+				$country = '(Other)';
+			}
+			if ( ! isset( $buckets[ $country ] ) ) {
+				$buckets[ $country ] = array();
+			}
+			if ( '' !== $state_raw && ! in_array( $state_raw, $buckets[ $country ], true ) ) {
+				$buckets[ $country ][] = $state_raw;
+			}
+		}
+
+		// Sort countries: US first, "(Other)" last, everything else alphabetical.
+		$country_names = array_keys( $buckets );
+		usort(
+			$country_names,
+			function ( $a, $b ) {
+				$a_us    = ( 'United States' === $a );
+				$b_us    = ( 'United States' === $b );
+				$a_other = ( '(Other)' === $a );
+				$b_other = ( '(Other)' === $b );
+				if ( $a_us && ! $b_us ) {
+					return -1;
+				}
+				if ( ! $a_us && $b_us ) {
+					return 1;
+				}
+				if ( $a_other && ! $b_other ) {
+					return 1;
+				}
+				if ( ! $a_other && $b_other ) {
+					return -1;
+				}
+				return strcasecmp( $a, $b );
+			}
+		);
+
+		// Within each country, sort states alphabetically.
+		foreach ( $buckets as &$states ) {
+			sort( $states, SORT_STRING | SORT_FLAG_CASE );
+		}
+		unset( $states );
+
+		// Build the flat option list. Country entries use a "country:" prefix
+		// in their value so parse_location_value() can distinguish them.
+		$out = array();
+		foreach ( $country_names as $country ) {
+			if ( '(Other)' !== $country ) {
+				$out[] = array(
+					'type'  => 'country',
+					'value' => 'country:' . $country,
+					'label' => $country,
+				);
+			}
+			foreach ( $buckets[ $country ] as $st ) {
+				$out[] = array(
+					'type'  => 'state',
+					'value' => $st,
+					'label' => mb_strtoupper( $st, 'UTF-8' ),
+				);
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Parse the dropdown's selected value into a (country, state) filter
+	 * pair. The value is one of:
+	 *   - ''                   (no filter)
+	 *   - 'country:<NAME>'     (country-only filter)
+	 *   - '<state>'            (state filter — may also be empty)
+	 *
+	 * @return array{0:string,1:string} [country, state]
+	 */
+	private static function parse_location_value( string $raw ): array {
+		$raw = trim( $raw );
+		if ( '' === $raw ) {
+			return array( '', '' );
+		}
+		if ( 0 === strncmp( $raw, 'country:', 8 ) ) {
+			return array( substr( $raw, 8 ), '' );
+		}
+		return array( '', $raw );
+	}
+
+	/**
+	 * Convert a raw country value (whatever Wicket gave us — could be a
+	 * 2-letter code, ALL CAPS name, or a properly-cased name) into a
+	 * canonical "Initial Caps" display name. Common ISO codes are
+	 * mapped explicitly so the dropdown doesn't show "Us" or "Ca". Other
+	 * values are title-cased; if Wicket already returned a properly
+	 * mixed-case name, it's left alone.
+	 *
+	 * Also called from ASAE_CAE_Sync::normalize_person() so the canonical
+	 * form is what gets stored in the DB — that means the dropdown filter
+	 * can use simple equality and doesn't have to handle synonyms.
+	 */
+	public static function display_country_name( string $raw ): string {
+		$raw = trim( $raw );
+		if ( '' === $raw ) {
+			return '';
+		}
+		static $iso_map = array(
+			'US'  => 'United States',
+			'USA' => 'United States',
+			'CA'  => 'Canada',
+			'CAN' => 'Canada',
+			'GB'  => 'United Kingdom',
+			'UK'  => 'United Kingdom',
+			'GBR' => 'United Kingdom',
+			'AU'  => 'Australia',
+			'AUS' => 'Australia',
+			'NZ'  => 'New Zealand',
+			'NZL' => 'New Zealand',
+			'IE'  => 'Ireland',
+			'IRL' => 'Ireland',
+		);
+		$upper = strtoupper( $raw );
+		if ( isset( $iso_map[ $upper ] ) ) {
+			return $iso_map[ $upper ];
+		}
+		// All-caps full names: title-case them.
+		if ( $raw === $upper && mb_strlen( $raw, 'UTF-8' ) > 3 ) {
+			return mb_convert_case( mb_strtolower( $raw, 'UTF-8' ), MB_CASE_TITLE, 'UTF-8' );
+		}
+		return $raw;
 	}
 
 	// ── Sub-renderers ────────────────────────────────────────────────────────
@@ -460,6 +623,7 @@ class ASAE_CAE_Shortcode {
 		string $search,
 		string $city,
 		string $state,
+		string $country,
 		bool $top
 	): void {
 		if ( $total <= 0 || $count_on_page <= 0 ) {
@@ -493,6 +657,13 @@ class ASAE_CAE_Shortcode {
 				/* translators: %s: state/province value */
 				__( 'state "%s"', 'asae-cae-roster' ),
 				$state
+			);
+		}
+		if ( '' !== $country ) {
+			$filter_parts[] = sprintf(
+				/* translators: %s: country name */
+				__( 'country "%s"', 'asae-cae-roster' ),
+				$country
 			);
 		}
 

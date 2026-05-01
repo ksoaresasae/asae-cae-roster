@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.15
+Stable tag: 0.0.16
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,14 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.16 =
+* New: State / Province dropdown is now grouped by country. The United States is special-cased to the top with all US states listed under it; other countries follow alphabetically with their respective provinces/regions. Country names render in Initial Caps, states/provinces render in ALL CAPS — the case difference IS the visual hierarchy (HTML <option> elements can't accept indented styling reliably across browsers, so case carries the meaning). Selecting a country option filters by that country regardless of state; selecting a state option filters by that state.
+* Schema: new `country` column on the people and staging tables. dbDelta runs automatically on the version bump (no manual migration). The column is empty for all existing rows until the next full sync repopulates it — until then the dropdown groups everything under "(Other)" at the bottom (still functional as a state filter, just no country headings).
+* Sync: new pick_address_parts() (replaces the old pick_city_state) extracts country from the same usable address as city/state, with a fallback walk over country, country_name, country_code, country_iso, country_iso_code attribute names. The captured country is normalized through display_country_name() before being stored — "US", "USA", and "United States" all collapse to "United States" in the DB so equality filtering works without a synonym table.
+* Filter logic: build_where() now takes a fifth filter (country); URL value cae_state=country:<NAME> is parsed server-side into a country-only filter, while a raw state value still filters by state. The two are mutually exclusive in the dropdown so this always disambiguates.
+* Results summary picks up the country filter: "Showing 1 - 50 of 412 results matching country "Canada"" or compound forms like "name "smi", country "United States"".
+* Note: re-sync required. The country column is empty until the next full sync runs (~19 minutes at default chunk settings). The dropdown will look correct after Sync Now completes and promotes staging to live.
 
 = 0.0.15 =
 * New: admin Settings -> Profile images checkbox (default: off). When unchecked, no person on the public roster shortcode displays a photo, and the photo column is omitted from the card layout entirely so the body fills the full width. The "Default photo" picker remains, but is only used when profile images are turned on and a person has no photo of their own.

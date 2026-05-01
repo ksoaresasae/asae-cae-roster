@@ -62,6 +62,7 @@ class ASAE_CAE_DB {
 			organization_name VARCHAR(500) NOT NULL DEFAULT '',
 			city VARCHAR(255) NOT NULL DEFAULT '',
 			state VARCHAR(100) NOT NULL DEFAULT '',
+			country VARCHAR(100) NOT NULL DEFAULT '',
 			photo_url TEXT NULL,
 			photo_attachment_id BIGINT UNSIGNED NULL,
 			cae_start_date DATE NULL,

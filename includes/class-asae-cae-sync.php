@@ -1182,8 +1182,13 @@ class ASAE_CAE_Sync {
 			}
 		}
 
-		// City / state from the person's first usable address.
-		list( $city, $state ) = self::pick_city_state( $person, $addrs_index );
+		// City / state / country from the person's first usable address.
+		// Country is normalized to its canonical "Initial Caps" form so
+		// "US", "USA", and "United States" all collapse into one DB value
+		// — that lets the dropdown filter use simple equality matching
+		// without having to maintain a synonym list at query time.
+		list( $city, $state, $country ) = self::pick_address_parts( $person, $addrs_index );
+		$country = ASAE_CAE_Shortcode::display_country_name( $country );
 
 		// First letter for the A-Z navigation. Capitalize and fall back to '#'
 		// for names that don't start with a letter (rare but possible).
@@ -1204,6 +1209,7 @@ class ASAE_CAE_Sync {
 			'organization_name'   => $org_name,
 			'city'                => $city,
 			'state'               => $state,
+			'country'             => $country,
 			'photo_url'           => $photo_url,
 			'cae_start_date'      => self::sanitize_date( $cae_value['start_date'] ?? null ),
 			'cae_end_date'        => self::sanitize_date( $cae_value['end_date'] ?? null ),
@@ -1237,6 +1243,7 @@ class ASAE_CAE_Sync {
 				'organization_name'   => $row['organization_name'],
 				'city'                => $row['city'],
 				'state'               => $row['state'],
+				'country'             => $row['country'],
 				'photo_url'           => $row['photo_url'],
 				'photo_attachment_id' => (int) $row['photo_attachment_id'],
 				'cae_start_date'      => $row['cae_start_date'],
@@ -1245,7 +1252,7 @@ class ASAE_CAE_Sync {
 			),
 			array(
 				'%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s',
-				'%s', '%d', '%s', '%s', '%s',
+				'%s', '%s', '%d', '%s', '%s', '%s',
 			)
 		);
 		return false !== $ok;
@@ -1272,18 +1279,18 @@ class ASAE_CAE_Sync {
 	}
 
 	/**
-	 * Pick the most appropriate city/state pair from a person's addresses.
+	 * Pick the most appropriate city/state/country from a person's addresses.
 	 * Prefers a "work" address; falls back to the first address that has
-	 * either a city or a state.
+	 * either a city, state, or country.
 	 *
 	 * @param array $person
 	 * @param array $addrs_index
-	 * @return array{0:string,1:string} [city, state]
+	 * @return array{0:string,1:string,2:string} [city, state, country]
 	 */
-	private static function pick_city_state( array $person, array $addrs_index ) {
+	private static function pick_address_parts( array $person, array $addrs_index ) {
 		$rels = $person['relationships']['addresses']['data'] ?? array();
 		if ( ! is_array( $rels ) ) {
-			return array( '', '' );
+			return array( '', '', '' );
 		}
 
 		$preferred = null;
@@ -1296,6 +1303,7 @@ class ASAE_CAE_Sync {
 			}
 			$addr_attrs = $addrs_index[ $id ]['attributes'] ?? array();
 			$city       = (string) ( $addr_attrs['city'] ?? '' );
+
 			// Wicket is Canadian-based and may use any of several names for
 			// the state/province field. Walk a candidate list until we find
 			// the first non-empty value. Order matters: prefer human-
@@ -1307,20 +1315,32 @@ class ASAE_CAE_Sync {
 					break;
 				}
 			}
-			if ( '' === $city && '' === $state ) {
+
+			// Same fallback pattern for country — prefer human-readable name
+			// over 2-letter ISO codes; the dropdown rendering will normalize
+			// codes back to canonical display names regardless.
+			$country = '';
+			foreach ( array( 'country_name', 'country', 'country_code', 'country_iso', 'country_iso_code' ) as $field_name ) {
+				if ( isset( $addr_attrs[ $field_name ] ) && '' !== (string) $addr_attrs[ $field_name ] ) {
+					$country = (string) $addr_attrs[ $field_name ];
+					break;
+				}
+			}
+
+			if ( '' === $city && '' === $state && '' === $country ) {
 				continue;
 			}
 			$kind = strtolower( (string) ( $addr_attrs['kind'] ?? $addr_attrs['address_type'] ?? '' ) );
 			if ( null === $first_any ) {
-				$first_any = array( $city, $state );
+				$first_any = array( $city, $state, $country );
 			}
 			if ( null === $preferred && in_array( $kind, array( 'work', 'business', 'office' ), true ) ) {
-				$preferred = array( $city, $state );
+				$preferred = array( $city, $state, $country );
 				break; // Work address found — stop looking.
 			}
 		}
 
-		return $preferred ?? ( $first_any ?? array( '', '' ) );
+		return $preferred ?? ( $first_any ?? array( '', '', '' ) );
 	}
 
 	/**
