@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.14
+Stable tag: 0.0.15
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.15 =
+* New: admin Settings -> Profile images checkbox (default: off). When unchecked, no person on the public roster shortcode displays a photo, and the photo column is omitted from the card layout entirely so the body fills the full width. The "Default photo" picker remains, but is only used when profile images are turned on and a person has no photo of their own.
+* New: cumulative City and State/Province filters in the public search form. The form now has three inputs — Search by name (existing), City (open-ended text, partial match), and State / Province (dropdown populated from distinct values in the live roster). Any combination of the three may be used; none is required. Searching "Smi" + city "An" + state "NY" returns Mary Smith in Anytown NY and Bob Smithson in Annandale NY. The letter nav hides whenever any of these filters is active (the user has narrowed by other criteria); clicking Clear resets all three.
+* Updated results-summary line for multi-filter searches: "Showing 1 - 50 of 78 results matching name "smi", city "an", state "NY"". The All/letter-mode wording ("results in All", "results in S") is unchanged.
+* Card markup: an .is-no-photo class is applied when photos are off, which (a) avoids emitting the empty photo container, and (b) overrides the mobile center-aligned stack rule (designed for photo-above-body layout) back to natural left-aligned reading flow.
 
 = 0.0.14 =
 * New: unified results-summary line — "Showing X - Y of Z results in <nav>" for All/letter views, or "Showing X - Y of Z results matching "<term>"" for searches. Replaces the old "X matches for 'term'" search-only summary so all three navigation modes share a consistent pattern. Rendered both above the listing (with role=status so screen readers announce result-count changes) and above the pagination (when there's more than one page); centered to span the listing's full width.

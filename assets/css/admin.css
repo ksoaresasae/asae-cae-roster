@@ -232,6 +232,21 @@
 	);
 }
 
+/* Settings: inline checkbox label (e.g. "Show profile images") used in
+ * places where a single checkbox lives in the form-table value column
+ * with its label to the right rather than the standard WP <th>-based
+ * label-on-the-left pattern. */
+.asae-cae-inline-checkbox {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4em;
+	font-weight: 500;
+	cursor: pointer;
+}
+.asae-cae-inline-checkbox input[type="checkbox"] {
+	margin: 0;
+}
+
 /* Day-of-week checkbox row for the scheduled-sync settings. Lays out
  * the seven labels in a horizontal flex row that wraps on narrow widths,
  * with each checkbox adjacent to its day label and a generous tap area. */

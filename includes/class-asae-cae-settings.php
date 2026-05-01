@@ -53,6 +53,7 @@ class ASAE_CAE_Settings {
 
 			// Public roster display.
 			'items_per_page'              => 50,
+			'show_profile_images'         => false, // Off by default — admins opt in.
 			'default_photo_attachment_id' => 0,
 		);
 	}
@@ -146,6 +147,12 @@ class ASAE_CAE_Settings {
 		if ( array_key_exists( 'items_per_page', $input ) ) {
 			$sanitized['items_per_page'] = self::clamp_int( $input['items_per_page'], 5, 100, 50 );
 		}
+		// show_profile_images is a checkbox: HTML forms omit unchecked boxes,
+		// so we treat presence of the _display_form marker as authority to
+		// overwrite this field — same pattern used for schedule_days.
+		if ( ! empty( $input['_display_form'] ) ) {
+			$sanitized['show_profile_images'] = ! empty( $input['show_profile_images'] );
+		}
 		if ( array_key_exists( 'default_photo_attachment_id', $input ) ) {
 			$sanitized['default_photo_attachment_id'] = max( 0, (int) $input['default_photo_attachment_id'] );
 		}
@@ -188,6 +195,7 @@ class ASAE_CAE_Settings {
 		return $out;
 	}
 	public static function get_items_per_page()   { return (int) self::get( 'items_per_page' ); }
+	public static function get_show_profile_images() { return (bool) self::get( 'show_profile_images' ); }
 	public static function get_default_photo_id() { return (int) self::get( 'default_photo_attachment_id' ); }
 
 	/**

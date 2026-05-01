@@ -49,24 +49,42 @@
 	box-shadow: none !important;
 }
 
-/* Search form. */
+/* Search form. Each filter input lives in a flex column so the label sits
+ * directly above its input (more usable than label-on-the-side once we
+ * have three filters). The form wraps to multiple rows on narrow widths. */
 .asae-cae-search {
 	display: flex;
 	flex-wrap: wrap;
-	align-items: center;
-	gap: 0.5em;
+	align-items: flex-end;
+	gap: 0.75em 1em;
 	margin-bottom: 1em;
 }
-.asae-cae-search label {
-	font-weight: 600;
+.asae-cae-search-field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25em;
+	flex: 1 1 200px;
+	min-width: 160px;
 }
-.asae-cae-search input[type="search"] {
-	flex: 1 1 240px;
+.asae-cae-search-field label {
+	font-weight: 600;
+	font-size: 0.95em;
+}
+.asae-cae-search input[type="search"],
+.asae-cae-search input[type="text"],
+.asae-cae-search select {
 	min-height: 2.4em;
 	padding: 0.3em 0.6em;
 	border: 1px solid #757575;
 	border-radius: 4px;
 	font: inherit;
+	background: #fff;
+}
+.asae-cae-search-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.6em;
 }
 .asae-cae-search-submit {
 	padding: 0.4em 1em;
@@ -170,6 +188,14 @@
 		flex-direction: column; /* stack photo above body, per _start.md */
 		align-items: center;
 		text-align: center;
+	}
+	/* When profile images are turned off (admin Settings -> Profile images),
+	 * there's no photo to anchor centered text against — switch back to
+	 * natural left-aligned reading flow on narrow widths. */
+	.asae-cae-card.is-no-photo {
+		flex-direction: row;
+		align-items: stretch;
+		text-align: left;
 	}
 }
 

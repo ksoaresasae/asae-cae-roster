@@ -184,6 +184,22 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 					</td>
 				</tr>
 				<tr>
+					<th scope="row"><?php echo esc_html__( 'Profile images', 'asae-cae-roster' ); ?></th>
+					<td>
+						<label for="asae-cae-show-profile-images" class="asae-cae-inline-checkbox">
+							<input type="checkbox" id="asae-cae-show-profile-images"
+								name="settings[show_profile_images]" value="1"
+								<?php checked( ! empty( $s['show_profile_images'] ) ); ?>
+								aria-describedby="asae-cae-show-profile-images-help" />
+							<?php echo esc_html__( 'Show profile images on the public roster', 'asae-cae-roster' ); ?>
+						</label>
+						<input type="hidden" name="settings[_display_form]" value="1" />
+						<p id="asae-cae-show-profile-images-help" class="description">
+							<?php echo esc_html__( 'When unchecked, no person on the public shortcode will display a photo. The "Default photo" setting below is only used when this is enabled and a person has no photo of their own.', 'asae-cae-roster' ); ?>
+						</p>
+					</td>
+				</tr>
+				<tr>
 					<th scope="row"><?php echo esc_html__( 'Default photo', 'asae-cae-roster' ); ?></th>
 					<td>
 						<div class="asae-cae-photo-picker">

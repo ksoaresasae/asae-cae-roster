@@ -26,6 +26,8 @@ class ASAE_CAE_Shortcode {
 	const QP_LETTER = 'cae_letter';
 	const QP_PAGE   = 'cae_page';
 	const QP_SEARCH = 'cae_search';
+	const QP_CITY   = 'cae_city';
+	const QP_STATE  = 'cae_state';
 
 	/**
 	 * Wire shortcode + asset enqueue.
@@ -76,13 +78,15 @@ class ASAE_CAE_Shortcode {
 		$state = self::read_state();
 
 		// Active letters drive the letter nav (disabled-styling for empties).
-		// In search mode the letter filter is ignored; otherwise an empty
-		// letter is the "All" view (entire roster, paginated). Invalid
-		// letters fall back to "All" rather than silently snapping to "A",
-		// which had given undue weight to people whose surnames started
-		// with that letter.
+		// When ANY of the three search filters (name/city/state) are active,
+		// the letter filter is ignored — the user has explicitly narrowed
+		// by other criteria. Otherwise an empty letter is the "All" view
+		// (entire roster, paginated). Invalid letters fall back to "All"
+		// rather than silently snapping to "A", which had given undue
+		// weight to people whose surnames started with that letter.
 		$active_letters = self::get_active_letters();
-		if ( '' !== $state['search'] ) {
+		$has_filters    = ( '' !== $state['search'] || '' !== $state['city'] || '' !== $state['state'] );
+		if ( $has_filters ) {
 			$state['letter'] = '';
 		} elseif ( '' !== $state['letter'] && ! in_array( $state['letter'], $active_letters, true ) ) {
 			$state['letter'] = '';
@@ -91,7 +95,7 @@ class ASAE_CAE_Shortcode {
 		$per_page = max( 5, min( 100, ASAE_CAE_Settings::get_items_per_page() ) );
 		$offset   = ( $state['page'] - 1 ) * $per_page;
 
-		$total       = self::count_records( $state['letter'], $state['search'] );
+		$total       = self::count_records( $state['letter'], $state['search'], $state['city'], $state['state'] );
 		$total_pages = $total > 0 ? (int) ceil( $total / $per_page ) : 1;
 
 		// Clamp page if the user supplied something out of range.
@@ -101,7 +105,7 @@ class ASAE_CAE_Shortcode {
 		}
 
 		$records = $total > 0
-			? self::fetch_records( $state['letter'], $state['search'], $offset, $per_page )
+			? self::fetch_records( $state['letter'], $state['search'], $state['city'], $state['state'], $offset, $per_page )
 			: array();
 
 		// Build the HTML in an output buffer so view-level helpers can echo.
@@ -111,32 +115,69 @@ class ASAE_CAE_Shortcode {
 
 			<form class="asae-cae-search" role="search"
 				method="get" action="<?php echo esc_url( self::current_path() ); ?>">
-				<?php self::print_preserved_get_inputs( array( self::QP_SEARCH, self::QP_PAGE, self::QP_LETTER ) ); ?>
-				<label for="asae-cae-q"><?php echo esc_html__( 'Search by name', 'asae-cae-roster' ); ?></label>
-				<input type="search" id="asae-cae-q" name="<?php echo esc_attr( self::QP_SEARCH ); ?>"
-					value="<?php echo esc_attr( $state['search'] ); ?>"
-					autocomplete="off"
-					placeholder="<?php echo esc_attr__( 'First or last name', 'asae-cae-roster' ); ?>" />
-				<button type="submit" class="asae-cae-search-submit">
-					<?php echo esc_html__( 'Search', 'asae-cae-roster' ); ?>
-				</button>
-				<?php if ( '' !== $state['search'] ) : ?>
-					<a class="asae-cae-search-clear"
-						href="<?php echo esc_url( self::build_url( array( self::QP_SEARCH => null, self::QP_PAGE => null ) ) ); ?>"
-						aria-label="<?php echo esc_attr__( 'Clear search and show entire roster', 'asae-cae-roster' ); ?>">
-						<?php echo esc_html__( 'Clear', 'asae-cae-roster' ); ?>
-					</a>
-				<?php endif; ?>
+				<?php
+				// Don't carry city/state/search/page/letter forward as
+				// hidden inputs — those are the filter fields the form is
+				// itself responsible for. Anything else (other unrelated
+				// query params on the page) gets preserved so we don't
+				// blow them away on submit.
+				self::print_preserved_get_inputs( array(
+					self::QP_SEARCH,
+					self::QP_PAGE,
+					self::QP_LETTER,
+					self::QP_CITY,
+					self::QP_STATE,
+				) );
+
+				$active_states = self::get_active_states();
+				?>
+				<div class="asae-cae-search-field">
+					<label for="asae-cae-q"><?php echo esc_html__( 'Search by name', 'asae-cae-roster' ); ?></label>
+					<input type="search" id="asae-cae-q" name="<?php echo esc_attr( self::QP_SEARCH ); ?>"
+						value="<?php echo esc_attr( $state['search'] ); ?>"
+						autocomplete="off"
+						placeholder="<?php echo esc_attr__( 'First or last name', 'asae-cae-roster' ); ?>" />
+				</div>
+				<div class="asae-cae-search-field">
+					<label for="asae-cae-city"><?php echo esc_html__( 'City', 'asae-cae-roster' ); ?></label>
+					<input type="text" id="asae-cae-city" name="<?php echo esc_attr( self::QP_CITY ); ?>"
+						value="<?php echo esc_attr( $state['city'] ); ?>"
+						autocomplete="off"
+						placeholder="<?php echo esc_attr__( 'Any', 'asae-cae-roster' ); ?>" />
+				</div>
+				<div class="asae-cae-search-field">
+					<label for="asae-cae-state"><?php echo esc_html__( 'State / Province', 'asae-cae-roster' ); ?></label>
+					<select id="asae-cae-state" name="<?php echo esc_attr( self::QP_STATE ); ?>">
+						<option value=""><?php echo esc_html__( 'Any', 'asae-cae-roster' ); ?></option>
+						<?php foreach ( $active_states as $st ) : ?>
+							<option value="<?php echo esc_attr( $st ); ?>"<?php selected( $state['state'], $st ); ?>>
+								<?php echo esc_html( $st ); ?>
+							</option>
+						<?php endforeach; ?>
+					</select>
+				</div>
+				<div class="asae-cae-search-actions">
+					<button type="submit" class="asae-cae-search-submit">
+						<?php echo esc_html__( 'Search', 'asae-cae-roster' ); ?>
+					</button>
+					<?php if ( $has_filters ) : ?>
+						<a class="asae-cae-search-clear"
+							href="<?php echo esc_url( self::build_url( array( self::QP_SEARCH => null, self::QP_CITY => null, self::QP_STATE => null, self::QP_PAGE => null ) ) ); ?>"
+							aria-label="<?php echo esc_attr__( 'Clear all search filters and show entire roster', 'asae-cae-roster' ); ?>">
+							<?php echo esc_html__( 'Clear', 'asae-cae-roster' ); ?>
+						</a>
+					<?php endif; ?>
+				</div>
 			</form>
 
-			<?php if ( '' === $state['search'] ) : ?>
+			<?php if ( ! $has_filters ) : ?>
 				<?php self::render_letter_nav( $active_letters, $state['letter'] ); ?>
 			<?php endif; ?>
 
 			<?php if ( empty( $records ) ) : ?>
 				<p class="asae-cae-empty">
 					<?php
-					if ( '' !== $state['search'] ) {
+					if ( $has_filters ) {
 						echo esc_html__( 'No CAEs match your search.', 'asae-cae-roster' );
 					} else {
 						echo esc_html__( 'No CAEs to display.', 'asae-cae-roster' );
@@ -144,7 +185,7 @@ class ASAE_CAE_Shortcode {
 					?>
 				</p>
 			<?php else : ?>
-				<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], true ); ?>
+				<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], $state['city'], $state['state'], true ); ?>
 
 				<ul class="asae-cae-list">
 					<?php foreach ( $records as $rec ) : ?>
@@ -153,7 +194,7 @@ class ASAE_CAE_Shortcode {
 				</ul>
 
 				<?php if ( $total_pages > 1 ) : ?>
-					<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], false ); ?>
+					<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], $state['city'], $state['state'], false ); ?>
 				<?php endif; ?>
 
 				<?php self::render_pagination( $state['page'], $total_pages ); ?>
@@ -170,13 +211,15 @@ class ASAE_CAE_Shortcode {
 	/**
 	 * Pull and sanitize roster state from the request query string.
 	 *
-	 * @return array{ letter:string, page:int, search:string }
+	 * @return array{ letter:string, page:int, search:string, city:string, state:string }
 	 */
 	private static function read_state(): array {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- public, read-only filter UI.
 		$letter_raw = isset( $_GET[ self::QP_LETTER ] ) ? wp_unslash( (string) $_GET[ self::QP_LETTER ] ) : '';
 		$page_raw   = isset( $_GET[ self::QP_PAGE ] )   ? wp_unslash( (string) $_GET[ self::QP_PAGE ] )   : '';
 		$search_raw = isset( $_GET[ self::QP_SEARCH ] ) ? wp_unslash( (string) $_GET[ self::QP_SEARCH ] ) : '';
+		$city_raw   = isset( $_GET[ self::QP_CITY ] )   ? wp_unslash( (string) $_GET[ self::QP_CITY ] )   : '';
+		$state_raw  = isset( $_GET[ self::QP_STATE ] )  ? wp_unslash( (string) $_GET[ self::QP_STATE ] )  : '';
 		// phpcs:enable
 
 		$letter = strtoupper( substr( $letter_raw, 0, 1 ) );
@@ -190,15 +233,30 @@ class ASAE_CAE_Shortcode {
 		}
 
 		$search = trim( sanitize_text_field( $search_raw ) );
-		// Cap the search term length defensively.
 		if ( mb_strlen( $search ) > 80 ) {
 			$search = mb_substr( $search, 0, 80 );
+		}
+
+		$city = trim( sanitize_text_field( $city_raw ) );
+		if ( mb_strlen( $city ) > 80 ) {
+			$city = mb_substr( $city, 0, 80 );
+		}
+
+		// State is matched exactly against a value from the dropdown, but
+		// keep it permissive so a malformed inbound URL doesn't 500. The
+		// caller still validates against the live distinct-states list to
+		// reject anything that doesn't actually exist.
+		$state = trim( sanitize_text_field( $state_raw ) );
+		if ( mb_strlen( $state ) > 80 ) {
+			$state = mb_substr( $state, 0, 80 );
 		}
 
 		return array(
 			'letter' => $letter,
 			'page'   => $page,
 			'search' => $search,
+			'city'   => $city,
+			'state'  => $state,
 		);
 	}
 
@@ -281,15 +339,11 @@ class ASAE_CAE_Shortcode {
 	}
 
 	/**
-	 * Total record count for the active letter / search filters.
-	 *
-	 * @param string $letter
-	 * @param string $search
-	 * @return int
+	 * Total record count for the active letter / search / city / state filters.
 	 */
-	private static function count_records( string $letter, string $search ): int {
+	private static function count_records( string $letter, string $search, string $city, string $state ): int {
 		global $wpdb;
-		list( $where_sql, $where_args ) = self::build_where( $letter, $search );
+		list( $where_sql, $where_args ) = self::build_where( $letter, $search, $city, $state );
 
 		$sql = 'SELECT COUNT(*) FROM ' . ASAE_CAE_DB::people_table() . $where_sql;
 		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -300,15 +354,11 @@ class ASAE_CAE_Shortcode {
 	 * Fetch records for the current page, ordered for natural alphabetical
 	 * browsing (family then given name).
 	 *
-	 * @param string $letter
-	 * @param string $search
-	 * @param int    $offset
-	 * @param int    $limit
 	 * @return array<int,object>
 	 */
-	private static function fetch_records( string $letter, string $search, int $offset, int $limit ): array {
+	private static function fetch_records( string $letter, string $search, string $city, string $state, int $offset, int $limit ): array {
 		global $wpdb;
-		list( $where_sql, $where_args ) = self::build_where( $letter, $search );
+		list( $where_sql, $where_args ) = self::build_where( $letter, $search, $city, $state );
 
 		$sql  = 'SELECT * FROM ' . ASAE_CAE_DB::people_table() . $where_sql .
 				' ORDER BY family_name ASC, given_name ASC, id ASC LIMIT %d OFFSET %d';
@@ -320,14 +370,13 @@ class ASAE_CAE_Shortcode {
 	}
 
 	/**
-	 * Build the parameterized WHERE clause and the corresponding $wpdb->prepare
-	 * args list for letter/search filters.
+	 * Build the parameterized WHERE clause for the four-way cumulative
+	 * filter (letter + name search + city LIKE + state exact match). Empty
+	 * filter values are skipped — none of the search inputs is required.
 	 *
-	 * @param string $letter
-	 * @param string $search
 	 * @return array{0:string,1:array}
 	 */
-	private static function build_where( string $letter, string $search ): array {
+	private static function build_where( string $letter, string $search, string $city, string $state ): array {
 		global $wpdb;
 		$conds = array();
 		$args  = array();
@@ -338,15 +387,42 @@ class ASAE_CAE_Shortcode {
 		}
 
 		if ( '' !== $search ) {
-			$like = '%' . $wpdb->esc_like( $search ) . '%';
+			$like    = '%' . $wpdb->esc_like( $search ) . '%';
 			$conds[] = '(family_name LIKE %s OR given_name LIKE %s OR full_name LIKE %s)';
 			$args[]  = $like;
 			$args[]  = $like;
 			$args[]  = $like;
 		}
 
+		if ( '' !== $city ) {
+			$conds[] = 'city LIKE %s';
+			$args[]  = '%' . $wpdb->esc_like( $city ) . '%';
+		}
+
+		if ( '' !== $state ) {
+			$conds[] = 'state = %s';
+			$args[]  = $state;
+		}
+
 		$where_sql = $conds ? ' WHERE ' . implode( ' AND ', $conds ) : '';
 		return array( $where_sql, $args );
+	}
+
+	/**
+	 * Distinct non-empty state values from the live people table, sorted
+	 * for the state-filter dropdown. Empty when no roster has been synced
+	 * or every record's state field is blank.
+	 *
+	 * @return string[]
+	 */
+	private static function get_active_states(): array {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$rows = $wpdb->get_col(
+			'SELECT DISTINCT state FROM ' . ASAE_CAE_DB::people_table() .
+			" WHERE state IS NOT NULL AND state != '' ORDER BY state ASC"
+		);
+		return $rows ? array_map( 'strval', $rows ) : array();
 	}
 
 	// ── Sub-renderers ────────────────────────────────────────────────────────
@@ -382,6 +458,8 @@ class ASAE_CAE_Shortcode {
 		int $total,
 		string $letter,
 		string $search,
+		string $city,
+		string $state,
 		bool $top
 	): void {
 		if ( $total <= 0 || $count_on_page <= 0 ) {
@@ -391,19 +469,46 @@ class ASAE_CAE_Shortcode {
 		$start = ( $current_page - 1 ) * $per_page + 1;
 		$end   = $start + $count_on_page - 1;
 
+		// Active search filters get described as a comma-separated suffix:
+		//   results matching name "smi", city "an", state "NY"
+		// When none are active, fall back to the navigation-mode wording:
+		//   results in All  /  results in S
+		$filter_parts = array();
 		if ( '' !== $search ) {
+			$filter_parts[] = sprintf(
+				/* translators: %s: search term */
+				__( 'name "%s"', 'asae-cae-roster' ),
+				$search
+			);
+		}
+		if ( '' !== $city ) {
+			$filter_parts[] = sprintf(
+				/* translators: %s: city name fragment */
+				__( 'city "%s"', 'asae-cae-roster' ),
+				$city
+			);
+		}
+		if ( '' !== $state ) {
+			$filter_parts[] = sprintf(
+				/* translators: %s: state/province value */
+				__( 'state "%s"', 'asae-cae-roster' ),
+				$state
+			);
+		}
+
+		if ( ! empty( $filter_parts ) ) {
 			$text = sprintf(
-				/* translators: 1: first item index, 2: last item index, 3: total count, 4: search term */
+				/* translators: 1: first item index, 2: last item index, 3: total count, 4: filter description */
 				_n(
-					'Showing %1$s - %2$s of %3$s result matching "%4$s"',
-					'Showing %1$s - %2$s of %3$s results matching "%4$s"',
+					'Showing %1$s - %2$s of %3$s result matching %4$s',
+					'Showing %1$s - %2$s of %3$s results matching %4$s',
 					$total,
 					'asae-cae-roster'
 				),
 				number_format_i18n( $start ),
 				number_format_i18n( $end ),
 				number_format_i18n( $total ),
-				$search
+				implode( ', ', $filter_parts )
 			);
 		} else {
 			$nav  = ( '' === $letter ) ? __( 'All', 'asae-cae-roster' ) : $letter;
@@ -503,20 +608,25 @@ class ASAE_CAE_Shortcode {
 	 * @return void
 	 */
 	private static function render_card( $rec ): void {
+		$show_photos = ASAE_CAE_Settings::get_show_profile_images();
 		$photo_url   = trim( (string) $rec->photo_url );
-		$default_url = ASAE_CAE_Photos::default_url( 'medium' );
+		$default_url = $show_photos ? ASAE_CAE_Photos::default_url( 'medium' ) : '';
 
 		// Pick the actual src. If the record has a photo URL, use it (the JS
 		// will swap to default on error). Otherwise render the default
-		// directly. If neither exists we render the empty-state placeholder.
-		if ( '' !== $photo_url ) {
+		// directly. If neither exists — or photos are off entirely — we
+		// skip the photo container so the body fills the card.
+		if ( ! $show_photos ) {
+			$src = '';
+		} elseif ( '' !== $photo_url ) {
 			$src = $photo_url;
 		} elseif ( '' !== $default_url ) {
 			$src = $default_url;
 		} else {
 			$src = '';
 		}
-		$is_empty = ( '' === $src );
+		$is_empty   = ( '' === $src );
+		$skip_photo = ! $show_photos;
 
 		$display_suffix = trim( (string) $rec->honorific_suffix );
 		$display_name   = trim( (string) $rec->full_name );
@@ -524,16 +634,18 @@ class ASAE_CAE_Shortcode {
 			$display_name = trim( $rec->given_name . ' ' . $rec->family_name );
 		}
 		?>
-		<li class="asae-cae-card">
-			<div class="asae-cae-card-photo<?php echo $is_empty ? ' is-empty' : ''; ?>">
-				<?php if ( ! $is_empty ) : ?>
-					<img src="<?php echo esc_url( $src ); ?>"
-						<?php if ( '' !== $photo_url && '' !== $default_url && $photo_url !== $default_url ) : ?>
-							data-fallback="<?php echo esc_url( $default_url ); ?>"
-						<?php endif; ?>
-						alt="" loading="lazy" decoding="async" />
-				<?php endif; ?>
-			</div>
+		<li class="asae-cae-card<?php echo $skip_photo ? ' is-no-photo' : ''; ?>">
+			<?php if ( ! $skip_photo ) : ?>
+				<div class="asae-cae-card-photo<?php echo $is_empty ? ' is-empty' : ''; ?>">
+					<?php if ( ! $is_empty ) : ?>
+						<img src="<?php echo esc_url( $src ); ?>"
+							<?php if ( '' !== $photo_url && '' !== $default_url && $photo_url !== $default_url ) : ?>
+								data-fallback="<?php echo esc_url( $default_url ); ?>"
+							<?php endif; ?>
+							alt="" loading="lazy" decoding="async" />
+					<?php endif; ?>
+				</div>
+			<?php endif; ?>
 			<div class="asae-cae-card-body">
 				<p class="asae-cae-card-name">
 					<?php
