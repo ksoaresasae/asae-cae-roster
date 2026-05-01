@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.17
+Stable tag: 0.0.18
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.18 =
+* Diagnostic: replaced the v0.0.13 "Address attribute keys" row (which only fired when type === 'addresses' was actually present in `included` — silent otherwise) with an "Included resources" table that always renders inside Diagnostic detail. Each row shows the resource type, count of resources of that type in the response, and the attribute keys of the first instance. If `included` is empty or absent, the table renders "(no included resources in response)" so we can still tell. This is to figure out what type name Wicket is using for sideloaded address resources on this tenant — pick_address_parts() currently looks for type='addresses' and we need to confirm whether that's right.
 
 = 0.0.17 =
 * Fix: Dry Run's "Diagnostic detail (request + response)" disclosure was being wiped from the results panel whenever the dry run returned at least one row. Cause: renderDryRunResults() in admin.js was appending the disclosure to the container, then doing container.innerHTML = '' just before rendering the records table — which erased the disclosure along with everything else. The disclosure-only-shows-on-empty-results behavior had been there since v0.0.13 but went unnoticed because the original use case (debugging zero-row state-field probes) hit the empty path. Removed the redundant clear so the disclosure (and its top-line summary) remain alongside the results table.

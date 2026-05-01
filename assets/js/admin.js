@@ -417,8 +417,40 @@
 				addRow('Response top-level keys', meta.response_keys.join(', '));
 			}
 			if (meta.response_meta)   { addRow('Response meta', meta.response_meta); }
-			if (meta.addr_attr_keys && meta.addr_attr_keys.length) {
-				addRow('Address attribute keys (first sideloaded address)', meta.addr_attr_keys.join(', '));
+			// Included-resources summary: always render so we can see
+			// what Wicket actually sideloaded (which is the source of
+			// truth for the field names we extract city/state/country
+			// from). Renders as a small table inside the disclosure;
+			// empty case still surfaces "(none)" so we know whether
+			// `included` was missing entirely vs typed differently.
+			if (typeof meta.included_summary !== 'undefined') {
+				var incHeading = document.createElement('p');
+				incHeading.innerHTML = '<strong>Included resources:</strong>';
+				det.appendChild(incHeading);
+
+				if (!meta.included_summary || !meta.included_summary.length) {
+					var incEmpty = document.createElement('p');
+					incEmpty.className = 'asae-cae-dry-run-detail-row';
+					incEmpty.textContent = '(no included resources in response)';
+					det.appendChild(incEmpty);
+				} else {
+					var incTable = document.createElement('table');
+					incTable.className = 'widefat striped asae-cae-probe-table';
+					incTable.innerHTML = '<thead><tr><th>type</th><th class="num">count</th><th>attribute keys (first of type)</th></tr></thead>';
+					var incBody = document.createElement('tbody');
+					meta.included_summary.forEach(function (s) {
+						var tr = document.createElement('tr');
+						var t1 = document.createElement('td'); t1.textContent = s.type || '';
+						var t2 = document.createElement('td'); t2.className = 'num';
+						t2.textContent = String(s.count || 0);
+						var t3 = document.createElement('td');
+						t3.textContent = (s.attr_keys && s.attr_keys.length) ? s.attr_keys.join(', ') : '(none)';
+						tr.appendChild(t1); tr.appendChild(t2); tr.appendChild(t3);
+						incBody.appendChild(tr);
+					});
+					incTable.appendChild(incBody);
+					det.appendChild(incTable);
+				}
 			}
 			if (typeof meta.baseline_count !== 'undefined' && meta.baseline_count !== null) {
 				var baselineMsg;

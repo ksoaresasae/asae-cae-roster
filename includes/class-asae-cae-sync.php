@@ -659,20 +659,30 @@ class ASAE_CAE_Sync {
 			}
 		}
 
-		// Diagnostic: capture the attribute keys from the first address
-		// resource in the response. Lets the dry-run UI show what field
-		// names Wicket actually uses for state/province on this tenant —
-		// useful when locations only show city and we need to know whether
-		// to add another fallback to pick_city_state().
-		$addr_attr_keys = array();
+		// Diagnostic: summarize every resource type in the `included`
+		// sideload so we can see what Wicket actually returned — which
+		// types exist, how many of each, and what their attribute keys
+		// look like. Useful when an "expected" type (e.g. 'addresses') is
+		// not coming through as named, or when we need to discover the
+		// field name a tenant uses for country/state/etc.
+		$included_summary = array();
 		foreach ( $included_acc as $row ) {
-			if ( isset( $row['type'] ) && 'addresses' === $row['type']
-				&& isset( $row['attributes'] ) && is_array( $row['attributes'] )
-			) {
-				$addr_attr_keys = array_keys( $row['attributes'] );
-				break;
+			if ( ! isset( $row['type'] ) ) {
+				continue;
 			}
+			$type = (string) $row['type'];
+			if ( ! isset( $included_summary[ $type ] ) ) {
+				$included_summary[ $type ] = array(
+					'type'      => $type,
+					'count'     => 0,
+					'attr_keys' => ( isset( $row['attributes'] ) && is_array( $row['attributes'] ) )
+						? array_keys( $row['attributes'] )
+						: array(),
+				);
+			}
+			$included_summary[ $type ]['count']++;
 		}
+		$included_summary = array_values( $included_summary );
 
 		return array(
 			'ok'             => true,
@@ -693,9 +703,9 @@ class ASAE_CAE_Sync {
 			'query_body'     => $body,
 			'response_keys'  => is_array( $first_resp ) ? array_keys( $first_resp ) : array(),
 			'response_meta'  => is_array( $first_resp ) && isset( $first_resp['meta'] ) ? $first_resp['meta'] : null,
-			'baseline_count' => $baseline_count,
-			'filter_probes'  => $filter_probes,
-			'addr_attr_keys' => $addr_attr_keys,
+			'baseline_count'     => $baseline_count,
+			'filter_probes'      => $filter_probes,
+			'included_summary'   => $included_summary,
 		);
 	}
 
