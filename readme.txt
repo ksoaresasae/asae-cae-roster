@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.19
+Stable tag: 0.0.20
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.20 =
+* Pagination is now also rendered at the top of the listing, just under the "Showing X - Y of Z" summary line, in addition to its existing position at the bottom. The bottom render_pagination() is unchanged. render_pagination() already self-suppresses on single-page results, so single-page views still don't show any pagination at all.
+* Card location line now forces ALL CAPS on the state/province value regardless of how Wicket stored it ("MD" stays "MD", "Maryland" becomes "MARYLAND", "Ontario" becomes "ONTARIO"). Matches the dropdown's case treatment so the visual language for state values is consistent everywhere it appears.
+* Search form label changed from "Search by name" to "Search by Name" for consistency with the title-cased City and State / Province field labels.
 
 = 0.0.19 =
 * State / Province dropdown: country options are now visually distinct from their constituent states/provinces. Two layers: (1) state labels are indented with leading non-breaking spaces — works in every browser since it's part of the label text, not CSS — making the country→state hierarchy obvious at a glance; (2) country options additionally render in italic and a slightly muted (#50575e — 7:1 contrast on white, well above WCAG AA) grey in browsers that honor CSS on <option> elements (Chrome and Edge fully; Firefox color only; Safari mostly ignored). The indentation is the primary distinguisher; the styling is layered reinforcement.

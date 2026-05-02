@@ -144,7 +144,7 @@ class ASAE_CAE_Shortcode {
 				$active_locations = self::get_active_locations();
 				?>
 				<div class="asae-cae-search-field">
-					<label for="asae-cae-q"><?php echo esc_html__( 'Search by name', 'asae-cae-roster' ); ?></label>
+					<label for="asae-cae-q"><?php echo esc_html__( 'Search by Name', 'asae-cae-roster' ); ?></label>
 					<input type="search" id="asae-cae-q" name="<?php echo esc_attr( self::QP_SEARCH ); ?>"
 						value="<?php echo esc_attr( $state['search'] ); ?>"
 						autocomplete="off"
@@ -210,6 +210,7 @@ class ASAE_CAE_Shortcode {
 				</p>
 			<?php else : ?>
 				<?php self::render_results_summary( $state['page'], $per_page, count( $records ), $total, $state['letter'], $state['search'], $state['city'], $state_filter, $country_filter, true ); ?>
+				<?php self::render_pagination( $state['page'], $total_pages ); ?>
 
 				<ul class="asae-cae-list">
 					<?php foreach ( $records as $rec ) : ?>
@@ -867,7 +868,13 @@ class ASAE_CAE_Shortcode {
 					<p class="asae-cae-card-org"><?php echo esc_html( $rec->organization_name ); ?></p>
 				<?php endif; ?>
 				<?php
-				$loc_parts = array_values( array_filter( array( $rec->city, $rec->state ) ) );
+				// State / province on the card always renders ALL CAPS
+				// regardless of how Wicket stored it ("MD", "Maryland",
+				// or "Ontario" all become "MD", "MARYLAND", "ONTARIO").
+				// Matches the dropdown's case treatment so the visual
+				// language is consistent everywhere a state appears.
+				$state_display = mb_strtoupper( (string) $rec->state, 'UTF-8' );
+				$loc_parts     = array_values( array_filter( array( $rec->city, $state_display ) ) );
 				if ( ! empty( $loc_parts ) ) :
 					?>
 					<p class="asae-cae-card-loc"><?php echo esc_html( implode( ', ', $loc_parts ) ); ?></p>
