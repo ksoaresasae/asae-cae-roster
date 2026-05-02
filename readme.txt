@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.18
+Stable tag: 0.0.19
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 0.0.19 =
+* State / Province dropdown: country options are now visually distinct from their constituent states/provinces. Two layers: (1) state labels are indented with leading non-breaking spaces — works in every browser since it's part of the label text, not CSS — making the country→state hierarchy obvious at a glance; (2) country options additionally render in italic and a slightly muted (#50575e — 7:1 contrast on white, well above WCAG AA) grey in browsers that honor CSS on <option> elements (Chrome and Edge fully; Firefox color only; Safari mostly ignored). The indentation is the primary distinguisher; the styling is layered reinforcement.
+* Empty-state message now reports which filters were tried. Previously: "No CAEs match your search." — opaque when you'd combined name + city + state. Now: "No CAEs match search for: name "smi", city "an", state "NY"". Reuses the same describe_filters() helper that builds the results-summary line above the listing, so the wording stays consistent in both places.
 
 = 0.0.18 =
 * Diagnostic: replaced the v0.0.13 "Address attribute keys" row (which only fired when type === 'addresses' was actually present in `included` — silent otherwise) with an "Included resources" table that always renders inside Diagnostic detail. Each row shows the resource type, count of resources of that type in the response, and the attribute keys of the first instance. If `included` is empty or absent, the table renders "(no included resources in response)" so we can still tell. This is to figure out what type name Wicket is using for sideloaded address resources on this tenant — pick_address_parts() currently looks for type='addresses' and we need to confirm whether that's right.

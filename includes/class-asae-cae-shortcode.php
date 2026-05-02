@@ -192,7 +192,17 @@ class ASAE_CAE_Shortcode {
 				<p class="asae-cae-empty">
 					<?php
 					if ( $has_filters ) {
-						echo esc_html__( 'No CAEs match your search.', 'asae-cae-roster' );
+						$empty_filter_desc = self::describe_filters(
+							$state['search'],
+							$state['city'],
+							$state_filter,
+							$country_filter
+						);
+						printf(
+							/* translators: %s: comma-separated list of filters used (e.g. name "smi", city "an") */
+							esc_html__( 'No CAEs match search for: %s', 'asae-cae-roster' ),
+							esc_html( $empty_filter_desc )
+						);
 					} else {
 						echo esc_html__( 'No CAEs to display.', 'asae-cae-roster' );
 					}
@@ -505,7 +515,14 @@ class ASAE_CAE_Shortcode {
 
 		// Build the flat option list. Country entries use a "country:" prefix
 		// in their value so parse_location_value() can distinguish them.
-		$out = array();
+		// State entries are indented with leading non-breaking spaces — that's
+		// the cross-browser way to convey the country→state hierarchy in a
+		// <select>, since CSS padding/text-indent on <option> elements is
+		// honored unevenly (Chrome OK, Firefox/Safari unreliable). The CSS
+		// italic+muted styling on country options is layered reinforcement
+		// for the browsers that do honor it.
+		$state_indent = str_repeat( "\u{00A0}", 4 );
+		$out          = array();
 		foreach ( $country_names as $country ) {
 			if ( '(Other)' !== $country ) {
 				$out[] = array(
@@ -518,7 +535,7 @@ class ASAE_CAE_Shortcode {
 				$out[] = array(
 					'type'  => 'state',
 					'value' => $st,
-					'label' => mb_strtoupper( $st, 'UTF-8' ),
+					'label' => $state_indent . mb_strtoupper( $st, 'UTF-8' ),
 				);
 			}
 		}
@@ -591,6 +608,46 @@ class ASAE_CAE_Shortcode {
 	// ── Sub-renderers ────────────────────────────────────────────────────────
 
 	/**
+	 * Build a comma-separated, human-readable description of which filters
+	 * the user has active — e.g. 'name "smi", city "an", state "NY"'. Used
+	 * both by the results-summary line above the listing and by the
+	 * empty-state message so the wording stays consistent. Returns an
+	 * empty string when no filters are set.
+	 */
+	private static function describe_filters( string $search, string $city, string $state, string $country ): string {
+		$parts = array();
+		if ( '' !== $search ) {
+			$parts[] = sprintf(
+				/* translators: %s: search term */
+				__( 'name "%s"', 'asae-cae-roster' ),
+				$search
+			);
+		}
+		if ( '' !== $city ) {
+			$parts[] = sprintf(
+				/* translators: %s: city name fragment */
+				__( 'city "%s"', 'asae-cae-roster' ),
+				$city
+			);
+		}
+		if ( '' !== $state ) {
+			$parts[] = sprintf(
+				/* translators: %s: state/province value */
+				__( 'state "%s"', 'asae-cae-roster' ),
+				$state
+			);
+		}
+		if ( '' !== $country ) {
+			$parts[] = sprintf(
+				/* translators: %s: country name */
+				__( 'country "%s"', 'asae-cae-roster' ),
+				$country
+			);
+		}
+		return implode( ', ', $parts );
+	}
+
+	/**
 	 * Render a unified "Showing X - Y of Z results in <nav>" / "matching
 	 * <search>" line that's used in three places visually:
 	 *
@@ -637,37 +694,9 @@ class ASAE_CAE_Shortcode {
 		//   results matching name "smi", city "an", state "NY"
 		// When none are active, fall back to the navigation-mode wording:
 		//   results in All  /  results in S
-		$filter_parts = array();
-		if ( '' !== $search ) {
-			$filter_parts[] = sprintf(
-				/* translators: %s: search term */
-				__( 'name "%s"', 'asae-cae-roster' ),
-				$search
-			);
-		}
-		if ( '' !== $city ) {
-			$filter_parts[] = sprintf(
-				/* translators: %s: city name fragment */
-				__( 'city "%s"', 'asae-cae-roster' ),
-				$city
-			);
-		}
-		if ( '' !== $state ) {
-			$filter_parts[] = sprintf(
-				/* translators: %s: state/province value */
-				__( 'state "%s"', 'asae-cae-roster' ),
-				$state
-			);
-		}
-		if ( '' !== $country ) {
-			$filter_parts[] = sprintf(
-				/* translators: %s: country name */
-				__( 'country "%s"', 'asae-cae-roster' ),
-				$country
-			);
-		}
+		$filter_desc = self::describe_filters( $search, $city, $state, $country );
 
-		if ( ! empty( $filter_parts ) ) {
+		if ( '' !== $filter_desc ) {
 			$text = sprintf(
 				/* translators: 1: first item index, 2: last item index, 3: total count, 4: filter description */
 				_n(
@@ -679,7 +708,7 @@ class ASAE_CAE_Shortcode {
 				number_format_i18n( $start ),
 				number_format_i18n( $end ),
 				number_format_i18n( $total ),
-				implode( ', ', $filter_parts )
+				$filter_desc
 			);
 		} else {
 			$nav  = ( '' === $letter ) ? __( 'All', 'asae-cae-roster' ) : $letter;

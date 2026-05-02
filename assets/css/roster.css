@@ -80,6 +80,18 @@
 	font: inherit;
 	background: #fff;
 }
+
+/* State / Province dropdown: country options render in italic and a slightly
+ * muted (still WCAG-AA contrast) grey to visually mark them as group
+ * headings amongst their states/provinces. The primary cross-browser
+ * hierarchy comes from the leading NBSP indent baked into state labels by
+ * get_active_locations(); this CSS is reinforcement for browsers that
+ * honor styling on <option> elements (Chrome/Edge fully; Firefox color
+ * only; Safari mostly ignored). */
+.asae-cae-search select option.asae-cae-loc-country {
+	font-style: italic;
+	color: #50575e; /* 7.0:1 on white — exceeds WCAG AA */
+}
 .asae-cae-search-actions {
 	display: flex;
 	flex-wrap: wrap;
