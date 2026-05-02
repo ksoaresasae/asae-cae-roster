@@ -325,9 +325,15 @@ class ASAE_CAE_Admin {
 	public static function ajax_test_connection(): void {
 		self::verify_ajax();
 
-		$base_url  = isset( $_POST['base_url'] )  ? sanitize_text_field( wp_unslash( $_POST['base_url'] ) )  : '';
-		$secret    = isset( $_POST['secret'] )    ? trim( wp_unslash( (string) $_POST['secret'] ) )           : '';
-		$person_id = isset( $_POST['person_id'] ) ? sanitize_text_field( wp_unslash( $_POST['person_id'] ) ) : '';
+		// Validate the base_url against http(s) before signing a JWT to it —
+		// otherwise a tampered admin form could route the JWT (which carries
+		// the configured HMAC secret in its signature) at an attacker host.
+		// esc_url_raw with an explicit scheme allowlist returns '' on
+		// anything that isn't http/https, including javascript:, data:, etc.
+		$base_url_raw = isset( $_POST['base_url'] ) ? wp_unslash( (string) $_POST['base_url'] ) : '';
+		$base_url     = '' !== $base_url_raw ? esc_url_raw( $base_url_raw, array( 'http', 'https' ) ) : '';
+		$secret       = isset( $_POST['secret'] )    ? trim( wp_unslash( (string) $_POST['secret'] ) )           : '';
+		$person_id    = isset( $_POST['person_id'] ) ? sanitize_text_field( wp_unslash( $_POST['person_id'] ) ) : '';
 
 		// Fall back to stored values for any field the form left blank — typical
 		// when an admin tweaks one credential without touching the others.

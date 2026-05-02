@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 0.0.20
+Stable tag: 1.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,20 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 1.0.0 =
+First major release. Followed a full security audit (SQL injection, XSS, CSRF, authorization, SSRF, JWT/HMAC handling, deserialization, file inclusion, secrets exposure, GitHub updater integrity, IDORs, uninstall safety) and a full WCAG 2.2 Level AA accessibility audit covering both the public roster shortcode and the admin UI. Net result: 0 critical/high security findings; 1 high accessibility finding (a single contrast value 0.04 below the AA threshold), 3 medium, and a number of low / informational items addressed below. Detailed audit notes retained internally.
+
+Security fixes
+* Test Connection now validates the base_url through esc_url_raw with an explicit http/https scheme allowlist before signing a JWT — closes a low-risk authenticated SSRF / credential-leak vector where a tampered admin form could route the JWT (signed with the configured HMAC secret) at an arbitrary host.
+* GitHub updater now host-allowlists the release asset URL against github.com / codeload.github.com / objects.githubusercontent.com before handing it to WP's auto-updater. A compromised release JSON couldn't redirect the updater at an attacker-controlled host without compromising GitHub itself.
+* Fixed the GitHub updater's negative-cache sentinel: a failed lookup was being stored as null, which is indistinguishable from "transient missing" when read back via get_transient. Now stores array('failed' => 1) so the 1-hour negative cache actually holds, and the API isn't re-hit on every page load after a transient failure.
+
+Accessibility fixes
+* Disabled letter-nav and pagination items: color bumped from #6c6f73 (~4.46:1 against white — fails WCAG AA by 0.04) to #646970 (~4.69:1 — passes AA). Net visual change is essentially imperceptible; the AT-relevant fix is in the contrast ratio.
+* Time-of-day hour/minute inputs are now wrapped in a <fieldset> with a screen-reader-only <legend> "Time of day (24-hour)". Sighted users see the existing "Time of day" row label unchanged; AT users now hear the grouping label before the two number inputs instead of "Hour, edit" with no surrounding context.
+* Dry-run results container is no longer a live region (aria-live="polite" aria-atomic="false" removed). The small status span above already announces "X records loaded" via role=status, and replaying the entire 50-row table + diagnostic disclosure as live-region appends was producing a noisy multi-second screen-reader announcement.
+* AJAX error path now surfaces server-supplied messages on non-2xx responses. Previously a 403 "Insufficient permissions." reply was being collapsed into a generic "could not save" string; the user now sees the actual reason. Implementation: a new readJsonResponse() helper that parses the JSON body even on non-2xx and only throws when there's no usable error payload to fall back on.
 
 = 0.0.20 =
 * Pagination is now also rendered at the top of the listing, just under the "Showing X - Y of Z" summary line, in addition to its existing position at the bottom. The bottom render_pagination() is unchanged. render_pagination() already self-suppresses on single-page results, so single-page views still don't show any pagination at all.

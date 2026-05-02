@@ -157,7 +157,14 @@ class ASAE_CAE_GitHub_Updater {
 
 		$transient_key = 'asae_cae_github_release';
 		$cached        = get_transient( $transient_key );
-		if ( $cached !== false ) {
+		// Negative-cache sentinel: a previous lookup that failed stored
+		// `array('failed' => 1)` so a retry only happens after the TTL.
+		// Cannot use null/false here because get_transient returns false
+		// for both "missing" and "stored false" — they'd be indistinguishable.
+		if ( false !== $cached ) {
+			if ( is_array( $cached ) && ! empty( $cached['failed'] ) ) {
+				return null;
+			}
 			$this->github_release = $cached;
 			return $cached;
 		}
@@ -175,7 +182,7 @@ class ASAE_CAE_GitHub_Updater {
 		);
 
 		if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) {
-			set_transient( $transient_key, null, HOUR_IN_SECONDS );
+			set_transient( $transient_key, array( 'failed' => 1 ), HOUR_IN_SECONDS );
 			return null;
 		}
 
@@ -191,24 +198,49 @@ class ASAE_CAE_GitHub_Updater {
 	}
 
 	/**
-	 * Extract the zip download URL from a GitHub release.
+	 * Extract the zip download URL from a GitHub release. Looks for a `.zip`
+	 * release asset first (our build-zip.php output), then falls back to
+	 * GitHub's auto-generated source zipball.
 	 *
-	 * Looks for a .zip release asset first (our build-zip.php output), then
-	 * falls back to GitHub's auto-generated source zipball.
+	 * The asset URL is host-allowlisted before being returned: the GitHub
+	 * release JSON is implicitly trusted, but the auto-updater will fetch
+	 * whatever URL we hand it. Restricting to known GitHub hosts means a
+	 * compromised release JSON couldn't redirect the updater at an
+	 * attacker-controlled host without also compromising GitHub itself.
 	 */
 	private function get_release_zip_url( $release ) {
 		if ( ! empty( $release->assets ) ) {
 			foreach ( $release->assets as $asset ) {
 				if ( substr( $asset->name, -4 ) === '.zip' ) {
-					return $asset->browser_download_url;
+					return self::verify_zip_host( $asset->browser_download_url );
 				}
 			}
 		}
 
 		if ( ! empty( $release->zipball_url ) ) {
-			return $release->zipball_url;
+			return self::verify_zip_host( $release->zipball_url );
 		}
 
 		return null;
+	}
+
+	/**
+	 * Return $url if it points at a known GitHub-owned host; null otherwise.
+	 * Anything outside this list — including subtly-typo'd lookalikes —
+	 * gets rejected before the auto-updater can fetch it.
+	 *
+	 * @param string $url
+	 * @return string|null
+	 */
+	private static function verify_zip_host( $url ) {
+		if ( empty( $url ) || ! is_string( $url ) ) {
+			return null;
+		}
+		$host = wp_parse_url( $url, PHP_URL_HOST );
+		if ( ! $host ) {
+			return null;
+		}
+		$allowed = array( 'github.com', 'codeload.github.com', 'objects.githubusercontent.com' );
+		return in_array( strtolower( $host ), $allowed, true ) ? $url : null;
 	}
 }

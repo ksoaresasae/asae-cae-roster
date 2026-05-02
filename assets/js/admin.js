@@ -31,6 +31,25 @@
 	 * Lightweight AJAX helper. Resolves with the parsed JSON, rejects on
 	 * network or HTTP failure. Always sets `action` and `nonce`.
 	 */
+	/**
+	 * Parse the JSON body even on non-2xx responses, so server-supplied error
+	 * messages (e.g. 403 "Insufficient permissions.") reach the UI status
+	 * span instead of being collapsed into a generic "could not save" string.
+	 * Throws only when there's no parseable JSON to fall back to — at which
+	 * point the catch handler still has something useful to render.
+	 */
+	function readJsonResponse(resp) {
+		return resp.json().catch(function () { return null; }).then(function (json) {
+			if (resp.ok) {
+				return json;
+			}
+			if (json && json.data && json.data.message) {
+				return json; // server gave us a usable error payload despite non-2xx
+			}
+			throw new Error('HTTP ' + resp.status);
+		});
+	}
+
 	function postAjax(action, fields) {
 		var fd = new FormData();
 		fd.append('action', action);
@@ -44,12 +63,7 @@
 			method: 'POST',
 			credentials: 'same-origin',
 			body: fd
-		}).then(function (resp) {
-			if (!resp.ok) {
-				throw new Error('HTTP ' + resp.status);
-			}
-			return resp.json();
-		});
+		}).then(readJsonResponse);
 	}
 
 	/**
@@ -64,12 +78,7 @@
 			method: 'POST',
 			credentials: 'same-origin',
 			body: fd
-		}).then(function (resp) {
-			if (!resp.ok) {
-				throw new Error('HTTP ' + resp.status);
-			}
-			return resp.json();
-		});
+		}).then(readJsonResponse);
 	}
 
 	// ── Save Settings ────────────────────────────────────────────────────────

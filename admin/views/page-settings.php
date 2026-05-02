@@ -139,23 +139,26 @@ $default_photo_id  = (int) $s['default_photo_attachment_id'];
 				<tr>
 					<th scope="row"><?php echo esc_html__( 'Time of day', 'asae-cae-roster' ); ?></th>
 					<td>
-						<label for="asae-cae-schedule-hour" class="screen-reader-text">
-							<?php echo esc_html__( 'Hour (0-23)', 'asae-cae-roster' ); ?>
-						</label>
-						<input type="number" id="asae-cae-schedule-hour" name="settings[schedule_hour]"
-							min="0" max="23" inputmode="numeric"
-							value="<?php echo esc_attr( $s['schedule_hour'] ); ?>"
-							class="small-text"
-							aria-describedby="asae-cae-schedule-help" />
-						<span aria-hidden="true">:</span>
-						<label for="asae-cae-schedule-minute" class="screen-reader-text">
-							<?php echo esc_html__( 'Minute (0-59)', 'asae-cae-roster' ); ?>
-						</label>
-						<input type="number" id="asae-cae-schedule-minute" name="settings[schedule_minute]"
-							min="0" max="59" inputmode="numeric"
-							value="<?php echo esc_attr( $s['schedule_minute'] ); ?>"
-							class="small-text"
-							aria-describedby="asae-cae-schedule-help" />
+						<fieldset class="asae-cae-time-fieldset" aria-describedby="asae-cae-schedule-help">
+							<legend class="screen-reader-text">
+								<?php echo esc_html__( 'Time of day (24-hour)', 'asae-cae-roster' ); ?>
+							</legend>
+							<label for="asae-cae-schedule-hour" class="screen-reader-text">
+								<?php echo esc_html__( 'Hour (0-23)', 'asae-cae-roster' ); ?>
+							</label>
+							<input type="number" id="asae-cae-schedule-hour" name="settings[schedule_hour]"
+								min="0" max="23" inputmode="numeric"
+								value="<?php echo esc_attr( $s['schedule_hour'] ); ?>"
+								class="small-text" />
+							<span aria-hidden="true">:</span>
+							<label for="asae-cae-schedule-minute" class="screen-reader-text">
+								<?php echo esc_html__( 'Minute (0-59)', 'asae-cae-roster' ); ?>
+							</label>
+							<input type="number" id="asae-cae-schedule-minute" name="settings[schedule_minute]"
+								min="0" max="59" inputmode="numeric"
+								value="<?php echo esc_attr( $s['schedule_minute'] ); ?>"
+								class="small-text" />
+						</fieldset>
 						<p id="asae-cae-schedule-help" class="description">
 							<?php echo esc_html__( '24-hour format. Use 02:00 for the default 2 AM run.', 'asae-cae-roster' ); ?>
 						</p>

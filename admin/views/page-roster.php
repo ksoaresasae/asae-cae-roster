@@ -178,8 +178,12 @@ if ( $latest ) {
 			<span id="asae-cae-dry-run-status" role="status" aria-live="polite" class="asae-cae-status-msg"></span>
 		</p>
 
-		<div id="asae-cae-dry-run-results" class="asae-cae-dry-run-results" hidden
-				aria-live="polite" aria-atomic="false"></div>
+		<!-- Results container is intentionally NOT a live region: the
+			 small status span above already announces "50 records loaded"
+			 via role=status, and replaying the entire 50-row table + the
+			 diagnostic disclosure as live-region appends would produce a
+			 noisy multi-second screen-reader announcement. -->
+		<div id="asae-cae-dry-run-results" class="asae-cae-dry-run-results" hidden></div>
 
 		<h2><?php echo esc_html__( 'How to display the roster', 'asae-cae-roster' ); ?></h2>
 		<p><?php echo esc_html__( 'Add this shortcode to any page or post:', 'asae-cae-roster' ); ?></p>

@@ -152,7 +152,7 @@
 	color: #fff;
 }
 .asae-cae-letters .is-disabled span {
-	color: #6c6f73; /* AA on white */
+	color: #646970; /* AA on white */
 	cursor: not-allowed;
 }
 
@@ -295,7 +295,7 @@
 	color: #fff;
 }
 .asae-cae-pagination .is-disabled span {
-	color: #6c6f73;
+	color: #646970;
 	cursor: not-allowed;
 }
 .asae-cae-pagination .is-ellipsis span {
