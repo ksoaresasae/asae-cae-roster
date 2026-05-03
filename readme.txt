@@ -4,7 +4,7 @@ Tags: asae, cae, roster, wicket
 Requires at least: 6.0
 Tested up to: 6.4
 Requires PHP: 8.0
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ The plugin is built to be a low-priority Wicket consumer: failed syncs revert to
 6. Add `[asae_cae_roster]` to any public page or post.
 
 == Changelog ==
+
+= 1.0.1 =
+* **Public roster colors now follow the active theme.** Previously every link, button, focus ring, letter-nav pill, pagination control, and current-state highlight in `assets/css/roster.css` had `#2271b1` (WordPress admin blue) hardcoded. Replaced with `var(--nv-primary-accent, #2271b1)` so the Neve theme renders in the site's brand color (e.g. ASAE's rust orange `#bd491e`) and other themes fall back to blue. The Search "Clear" link drops its explicit `color` rule entirely so it inherits the theme's normal anchor styling. Hover states use `filter: brightness(0.85)` (submit button) or `brightness(0.95)` (letter / pagination nav) instead of hardcoded darker blues, so the darken effect works regardless of base color. Mirrors the same fix shipped in asae-news-releases v0.2.3.
+* Admin styling (`assets/css/admin.css`) is unchanged — admin UI uses WordPress admin colors by design.
 
 = 1.0.0 =
 First major release. Followed a full security audit (SQL injection, XSS, CSRF, authorization, SSRF, JWT/HMAC handling, deserialization, file inclusion, secrets exposure, GitHub updater integrity, IDORs, uninstall safety) and a full WCAG 2.2 Level AA accessibility audit covering both the public roster shortcode and the admin UI. Net result: 0 critical/high security findings; 1 high accessibility finding (a single contrast value 0.04 below the AA threshold), 3 medium, and a number of low / informational items addressed below. Detailed audit notes retained internally.

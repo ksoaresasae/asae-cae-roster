@@ -2,8 +2,16 @@
  * ASAE CAE Roster — public shortcode styles.
  *
  * Layout: side-by-side photo + body above 1200px, stacked below.
- * Colors are tuned for WCAG 2.2 AA contrast on a white page background;
+ * Colors tuned for WCAG 2.2 AA contrast on a white page background;
  * themes that change the page background should override .asae-cae-roster.
+ *
+ * Color scheme: primary accent comes from `--nv-primary-accent` when
+ * the active theme is Neve (so the plugin matches the site brand —
+ * e.g. ASAE's rust orange #bd491e), and falls back to WP-admin blue
+ * #2271b1 elsewhere. Inline text links (Clear) drop their explicit
+ * color and inherit the theme's link styling. Hover states use
+ * `filter: brightness(...)` so darkening works regardless of base
+ * color.
  */
 
 .asae-cae-roster {
@@ -23,7 +31,7 @@
 .asae-cae-roster input:focus-visible,
 .asae-cae-roster select:focus-visible,
 .asae-cae-roster textarea:focus-visible {
-	outline: 3px solid #2271b1;
+	outline: 3px solid var(--nv-primary-accent, #2271b1);
 	outline-offset: 2px;
 }
 
@@ -100,19 +108,21 @@
 }
 .asae-cae-search-submit {
 	padding: 0.4em 1em;
-	border: 1px solid #2271b1;
-	background: #2271b1;
+	border: 1px solid var(--nv-primary-accent, #2271b1);
+	background: var(--nv-primary-accent, #2271b1);
 	color: #fff;
 	border-radius: 4px;
 	cursor: pointer;
 	font: inherit;
 }
-.asae-cae-search-submit:hover {
-	background: #135e96;
-	border-color: #135e96;
+.asae-cae-search-submit:hover,
+.asae-cae-search-submit:focus {
+	/* Theme-agnostic darken — works regardless of the brand color
+	 * that the variable resolves to. */
+	filter: brightness(0.85);
 }
 .asae-cae-search-clear {
-	color: #2271b1;
+	/* Inherit theme link color rather than forcing one. */
 	text-decoration: underline;
 }
 
@@ -140,15 +150,16 @@
 	font-weight: 600;
 }
 .asae-cae-letters a {
-	color: #2271b1;
+	color: var(--nv-primary-accent, #2271b1);
 	text-decoration: none;
 }
-.asae-cae-letters a:hover {
-	background: #f0f6fc;
+.asae-cae-letters a:hover,
+.asae-cae-letters a:focus {
+	filter: brightness(0.95);
 	text-decoration: underline;
 }
 .asae-cae-letters .is-current span {
-	background: #2271b1;
+	background: var(--nv-primary-accent, #2271b1);
 	color: #fff;
 }
 .asae-cae-letters .is-disabled span {
@@ -283,15 +294,16 @@
 	font-weight: 600;
 }
 .asae-cae-pagination a {
-	color: #2271b1;
+	color: var(--nv-primary-accent, #2271b1);
 	text-decoration: none;
 }
-.asae-cae-pagination a:hover {
-	background: #f0f6fc;
+.asae-cae-pagination a:hover,
+.asae-cae-pagination a:focus {
+	filter: brightness(0.95);
 	text-decoration: underline;
 }
 .asae-cae-pagination .is-current span {
-	background: #2271b1;
+	background: var(--nv-primary-accent, #2271b1);
 	color: #fff;
 }
 .asae-cae-pagination .is-disabled span {
